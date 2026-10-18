@@ -448,7 +448,7 @@ const FT=[
  fn('compile_app','Compile the current workspace project or web app into an installable Android .apk file.',{project_dir:S('Path to project root containing AndroidManifest.xml or index.html'),app_name:S('Optional app label'),package_id:S('Optional package id e.g. com.example.app')},['project_dir']),
  fn('compiler_status','Check whether on-device aapt2/android.jar/shell dex are ready.',{},[])];
 const WT=fn('web_search','Search the web for current information.',{query:S('Search query'),max_results:Nn('1-10')},['query']);
-const ASK=new Set(['gh_commit','gh_create_pr','move','copy','delete','write_file','edit_file','compile_app']);
+const ASK=new Set(['forge_tool','delete_forged_tool','gh_commit','gh_create_pr','move','copy','delete','write_file','edit_file','compile_app']);
 const searchReady=()=>{const p=PROV[cfg.search.prov];return p&&(p.need==='key'?!!cfg.search.keys[cfg.search.prov]:p.need==='sx'?!!cfg.search.sx:p.need==='cu'?!!cfg.search.cu:true)};
 function tools(){const t=[];if(cfg.files&&NI)t.push(...FT);if(cfg.search.on&&searchReady())t.push(WT);return t}
 function sysFullBase(){let s=cfg.sys;if(tools().length){s+=`\n\nToday is ${new Date().toDateString()}. You can call tools.${cfg.files&&NI?` File paths are relative to the workspace root (${NI.root}).`:''} Look before you act: list or search to find real paths, never guess them. Use recall_files for semantic discovery. Use save_fact for durable preferences/conventions (telegraphic, under 20 words). Do destructive changes only when asked. Keep arguments short. When done, say briefly what you did, and never claim something a tool did not confirm.`}return s}
@@ -491,6 +491,11 @@ async function webSearch(q,n){const s=cfg.search,p=PROV[s.prov];if(!q)throw Erro
 const arr=x=>[].concat(x==null?[]:x).filter(v=>v!==''),base=p=>String(p||'').replace(/\/+$/,'').split('/').pop()||'/';
 const items=x=>{const a=arr(x);return a.length===1?`"${base(a[0])}"`:`${a.length} items`};
 const TT={
+
+ forge_tool:{i:'bulb',v:['Forging','Forged','Forge'],o:a=>`tool "${a.name||'custom'}"`,s:a=>`${a.name||''} · ${a.description||''}`},
+ delete_forged_tool:{i:'trash',v:['Deleting','Deleted','Delete'],o:a=>`tool "${a.name||''}"`,s:a=>a.name||''},
+ list_forged_tools:{i:'bulb',v:['Listing','Listed','List'],o:()=>'forged tools',s:()=>'custom skill library'},
+
  list_dir:{i:'folder',v:['Reading','Read','Read'],o:a=>'folder '+(a.path&&a.path!=='.'?base(a.path):'(root)'),s:(a,k)=>(a.path||'.')+(k.data?` · ${k.data.total} entries`:'')},
  find_files:{i:'find',v:['Searching','Searched','Search'],o:a=>`for "${a.query||'…'}"`,s:(a,k)=>(a.path||'.')+(k.data?` · ${k.data.total} found`:'')},
  read_file:{i:'file',v:['Reading','Read','Read'],o:a=>base(a.path)||'file',s:a=>a.path||''},
@@ -672,6 +677,89 @@ async function ghTool(name, a){
   throw Error("Unknown gh op: " + name);
 }
 
+
+/* ---------- Forged Skills Engine (Runtime Self-Extending Tools) ---------- */
+let customTools = (() => {
+  try { return JSON.parse(LS.getItem("lc.custom_tools") || "[]"); }
+  catch(_) { return []; }
+})();
+const saveCustomTools = () => {
+  try { LS.setItem("lc.custom_tools", JSON.stringify(customTools)); } catch(_) {}
+};
+
+const FORGE_TOOLS = [
+  fn("forge_tool", "Create and install a brand new JavaScript tool for yourself when a requested capability is missing. The user reviews and approves the code before it is added to your toolbelt.", {
+    name: S("Unique function name in snake_case e.g. convert_currency"),
+    description: S("Clear description of what the tool does and when to call it"),
+    parameters_json: S("JSON schema string for parameters e.g. {\"type\":\"object\",\"properties\":{\"amount\":{\"type\":\"number\"}},\"required\":[\"amount\"]}"),
+    code: S("JavaScript function body. Receives 'args' and environment '{ httpx, nat }'. Must return a string or JSON object."),
+    suite: S("Optional category tag e.g. math, web, utility")
+  }, ["name", "description", "parameters_json", "code"]),
+  fn("list_forged_tools", "List all currently installed custom tools in your forged skill library.", {}, []),
+  fn("delete_forged_tool", "Uninstall a custom forged tool if it is obsolete or broken.", { name: S("Name of the tool to remove") }, ["name"])
+];
+
+function forgeCustomTool(a){
+  const name = String(a.name || "").trim().toLowerCase().replace(/[^a-z0-9_]/g, "_");
+  if(!name) throw Error("Tool name is required (alphanumeric/snake_case).");
+  const desc = String(a.description || "").trim();
+  if(!desc) throw Error("Tool description is required.");
+  let params = { type: "object", properties: {} };
+  if(a.parameters_json){
+    try { params = typeof a.parameters_json === "object" ? a.parameters_json : JSON.parse(a.parameters_json); }
+    catch(e){ throw Error("Invalid parameters_json schema: " + e.message); }
+  }
+  const code = String(a.code || "").trim();
+  if(!code) throw Error("Tool JavaScript code is required.");
+
+  // Pre-flight test compile the JS function
+  try {
+    const AsyncFunction = Object.getPrototypeOf(async function(){}).constructor;
+    new AsyncFunction("args", "{ httpx, nat }", code);
+  } catch(e) {
+    throw Error("JavaScript syntax error in tool code: " + e.message);
+  }
+
+  customTools = customTools.filter(t => t.name !== name);
+  customTools.push({
+    name,
+    description: desc,
+    parameters: params,
+    code,
+    suite: a.suite || "custom",
+    created: Date.now()
+  });
+  saveCustomTools();
+  return {
+    text: `Successfully forged and installed tool "${name}"! It is now permanently in your toolbelt.`,
+    data: { name, suite: a.suite || "custom" }
+  };
+}
+
+function deleteCustomTool(a){
+  const name = String(a.name || "").trim();
+  const prev = customTools.length;
+  customTools = customTools.filter(t => t.name !== name);
+  saveCustomTools();
+  return { text: customTools.length < prev ? `Deleted forged tool "${name}".` : `Tool "${name}" not found.` };
+}
+
+function listCustomTools(){
+  if(!customTools.length) return { text: "No forged tools installed yet." };
+  const list = customTools.map(t => `- ${t.name}: ${t.description} [${t.suite || "custom"}]`).join("\n");
+  return { text: `Active forged tools (${customTools.length}):\n${list}`, data: { tools: customTools } };
+}
+
+async function execCustomTool(tool, args){
+  const AsyncFunction = Object.getPrototypeOf(async function(){}).constructor;
+  const fnExec = new AsyncFunction("args", "{ httpx, nat }", tool.code);
+  const out = await fnExec(args, { httpx, nat });
+  return {
+    text: typeof out === "object" ? JSON.stringify(out, null, 2) : String(out ?? "(done)"),
+    data: typeof out === "object" ? out : null
+  };
+}
+
 async function runTool(k){if(k.name==='web_search')return webSearch(k.args.query,k.args.max_results);
  if(k.name.startsWith('gh_'))return ghTool(k.name,k.args);return J.parse(await nat(k.name,k.args))}
 async function execCalls(a){const L=a.calls;
@@ -769,6 +857,12 @@ function paneTools(){return`<div class="pane" data-p="tool"><div class="sec">Pho
   <textarea class="in" id="mem-anchor" rows="2" placeholder="Device, project, preferences…"></textarea>
   <button class="btn sm" id="mem-anchor-save" style="margin-top:6px">Save anchor</button>
  </div>
+ 
+ <div class="sec">Forged Skill Library</div>
+ <div class="note" style="margin:2px 0 6px">Tools Kojot has autonomously coded and installed at runtime.</div>
+ <div id="forged-list" style="max-height:120px;overflow-y:auto;font-family:var(--mono);font-size:12px;margin:6px 0;padding:6px;background:var(--bg-well);border-radius:8px"></div>
+ <button class="btn sm dng" id="clear-forged">Reset All Forged Tools</button>
+
  <div class="sec">APK compiler</div>
  <div class="set"><div class="lt"><span>On-device build</span><small id="cmp-s">aapt2 · d8 · shell</small></div></div>
  <div class="r2" style="margin-top:6px;flex-wrap:wrap">
@@ -802,7 +896,13 @@ function fill(){document.querySelectorAll('#s-body [data-k]').forEach(e=>{const 
 const segs=()=>document.querySelectorAll('#s-body [data-seg]').forEach(s=>{const v=getPath(cfg,s.dataset.seg);s.querySelectorAll('button').forEach(b=>b.classList.toggle('on',b.dataset.v===v))});
 const lab=()=>{const a=$('[data-o=t]'),b=$('[data-o=m]');if(a)a.textContent=(+cfg.t).toFixed(2);if(b)b.textContent=cfg.m};
 const provVis=()=>document.querySelectorAll('#s-body [data-prov]').forEach(e=>e.hidden=!e.dataset.prov.split(' ').includes(cfg.search.prov));
-function filesUI(){if(!$('#fs-t'))return;ninfo();const ok=NI&&NI.files;$('#fs-t').textContent=!NI?'Not inside the app':ok?'Files access granted':'Files access needed';
+function filesUI(){
+
+ const fl = $("#forged-list");
+ if(fl){
+   fl.innerHTML = customTools.length ? customTools.map(t => `<div>• <b>${t.name}</b>: ${t.description}</div>`).join("") : "(No forged tools installed)";
+ }
+if(!$('#fs-t'))return;ninfo();const ok=NI&&NI.files;$('#fs-t').textContent=!NI?'Not inside the app':ok?'Files access granted':'Files access needed';
  $('#fs-s').textContent=!NI?'File tools only work in the Android app':ok?'Root: '+NI.root:'Tap Grant, then allow “manage all files” for Kojot';$('#fs-g').hidden=!NI||!!ok;
  const b=NI&&NI.base;$('#roots').innerHTML=b?[['Phone',b],['Downloads',b+'/Download'],['Documents',b+'/Documents'],['Pictures',b+'/Pictures'],['Photos',b+'/DCIM']].map(([n,p])=>`<button data-r="${ea(p)}">${n}</button>`).join(''):'';$('#rt').value=NI?NI.root:'';
  // refresh memory stats + anchor when tools pane is built
