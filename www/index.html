@@ -923,6 +923,15 @@ if(!$('#fs-t'))return;ninfo();const ok=NI&&NI.files;$('#fs-t').textContent=!NI?'
     }catch(_){}
   }).catch(()=>{});
  }
+ if($('#vit-s')){
+  nat('get_vitals',{}).then(raw=>{
+    try{
+      const r=JSON.parse(raw);
+      if(r.data && $('#vit-s')) $('#vit-s').textContent=`${r.data.battery_pct}% · ${r.data.temp_c}°C · ${r.data.avail_ram_mb}MB free RAM`;
+      if(r.text && $('#vit-m')) $('#vit-m').textContent=r.text;
+    }catch(_){}
+  }).catch(()=>{});
+ }
  $('#roots').innerHTML=b?[['Phone',b],['Downloads',b+'/Download'],['Documents',b+'/Documents'],['Pictures',b+'/Pictures'],['Photos',b+'/DCIM']].map(([n,p])=>`<button data-r="${ea(p)}">${n}</button>`).join(''):'';$('#rt').value=NI?NI.root:'';
  // refresh memory stats + anchor when tools pane is built
  if($('#mem-s')){nat('memory_stats',{}).then(raw=>{try{const r=JSON.parse(raw);$('#mem-s').textContent=r.text;if($('#mem-m'))$('#mem-m').textContent=''}catch(_){}}).catch(()=>{});
@@ -945,6 +954,21 @@ $('#s-body').addEventListener('click',async e=>{const t=e.target;let b;
  if(t.closest('#mem-clear')){if(!confirm('Clear all stored facts?'))return;const m=$('#mem-m');try{const r=JSON.parse(await nat('clear_facts',{}));m.style.color='var(--success)';m.textContent=r.text}catch(x){m.style.color='var(--danger)';m.textContent=x.message}return}
  if(t.closest('#mem-emb')){try{await nat('pick_embedding',{});const m=$('#mem-m');m.style.color='var(--fg-2)';m.textContent='Pick nomic-embed-text GGUF…'}catch(x){$('#mem-m').textContent=x.message}return}
  if(t.closest('#mem-anchor-save')){const m=$('#mem-m');const text=$('#mem-anchor').value.trim();try{const r=JSON.parse(await nat('set_user_anchor',{text}));m.style.color='var(--success)';m.textContent=r.text}catch(x){m.style.color='var(--danger)';m.textContent=x.message}return}
+ if(t.closest('#vit-check')){
+   const m=$('#vit-m');
+   m.style.color='var(--fg-2)';
+   m.textContent='Checking diagnostics…';
+   try{
+     const r=JSON.parse(await nat('get_vitals',{}));
+     m.style.color='var(--fg)';
+     m.textContent=r.text;
+     if(r.data && $('#vit-s')) $('#vit-s').textContent=`${r.data.battery_pct}% · ${r.data.temp_c}°C · ${r.data.avail_ram_mb}MB free RAM`;
+   }catch(x){
+     m.style.color='var(--danger)';
+     m.textContent=x.message;
+   }
+   return;
+ }
  if(t.closest('#vit-check')){
    const m=$('#vit-m');
    m.style.color='var(--fg-2)';
