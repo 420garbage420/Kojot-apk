@@ -452,8 +452,21 @@ const FT=[
 const WT=fn('web_search','Search the web for current information.',{query:S('Search query'),max_results:Nn('1-10')},['query']);
 const ASK=new Set(['forge_tool','delete_forged_tool','gh_commit','gh_create_pr','move','copy','delete','write_file','edit_file','compile_app']);
 const searchReady=()=>{const p=PROV[cfg.search.prov];return p&&(p.need==='key'?!!cfg.search.keys[cfg.search.prov]:p.need==='sx'?!!cfg.search.sx:p.need==='cu'?!!cfg.search.cu:true)};
-function tools(){const t=[];if(cfg.files&&NI)t.push(...FT);if(cfg.search.on&&searchReady())t.push(WT);return t}
-function sysFullBase(){let s=cfg.sys;if(tools().length){s+=`\n\nToday is ${new Date().toDateString()}. You can call tools.${cfg.files&&NI?` File paths are relative to the workspace root (${NI.root}).`:''} Look before you act: list or search to find real paths, never guess them. Use recall_files for semantic discovery. Use save_fact for durable preferences/conventions (telegraphic, under 20 words). Do destructive changes only when asked. Keep arguments short. When done, say briefly what you did, and never claim something a tool did not confirm.`}return s}
+function tools(){
+  const t=[];
+  if(cfg.files&&NI)t.push(...FT);
+  if(cfg.search.on&&searchReady())t.push(WT);
+  if(typeof GHT!=="undefined"&&cfg.github?.token?.trim())t.push(...GHT);
+  if(typeof FORGE_TOOLS!=="undefined")t.push(...FORGE_TOOLS);
+  if(typeof customTools!=="undefined"){
+    customTools.forEach(ct=>t.push({
+      type:"function",
+      function:{name:ct.name,description:ct.description,parameters:ct.parameters||{type:"object",properties:{}}}
+    }));
+  }
+  return t;
+}
+function sysFullBase(){let s=cfg.sys;if(tools().length){s+=`\n\nToday is ${new Date().toDateString()}. You can call tools.${cfg.files&&NI?` File paths are relative to the workspace root (${NI.root}).`:''} Look before you act: list or search to find real paths, never guess them. Use recall_files for semantic discovery. Use save_fact for durable preferences/conventions (telegraphic, under 20 words). Do destructive changes only when asked. Keep arguments short. If you lack a required tool or API integration to complete a request, use forge_tool to autonomously construct and install it. When done, say briefly what you did, and never claim something a tool did not confirm.`}return s}
 function sysFull(){return sysFullBase()}
 async function sysFullWithMemory(userMsg){
   let s=sysFullBase();
@@ -763,8 +776,16 @@ async function execCustomTool(tool, args){
   };
 }
 
-async function runTool(k){if(k.name==='web_search')return webSearch(k.args.query,k.args.max_results);
- if(k.name.startsWith('gh_'))return ghTool(k.name,k.args);return J.parse(await nat(k.name,k.args))}
+async function runTool(k){
+  if(k.name==='web_search')return webSearch(k.args.query,k.args.max_results);
+  if(k.name.startsWith('gh_'))return ghTool(k.name,k.args);
+  if(k.name==='forge_tool')return forgeCustomTool(k.args);
+  if(k.name==='list_forged_tools')return listCustomTools();
+  if(k.name==='delete_forged_tool')return deleteCustomTool(k.args);
+  const ct=(typeof customTools!=="undefined")&&customTools.find(t=>t.name===k.name);
+  if(ct)return await execCustomTool(ct,k.args);
+  return J.parse(await nat(k.name,k.args));
+}
 async function execCalls(a){const L=a.calls;
  for(const k of L){if(k.state==='err')continue;k.state=cfg.ask&&ASK.has(k.name)?'ask':'queued';if(k.state==='ask'){let r;const p=new Promise(x=>r=x);gate.set(k.id,{p,r})}}
  refresh(a);
@@ -982,6 +1003,13 @@ $('#s-body').addEventListener('click',async e=>{const t=e.target;let b;
      m.style.color='var(--danger)';
      m.textContent=x.message;
    }
+   return;
+ }
+ if(t.closest('#clear-forged')){
+   if(!confirm('Reset and wipe all custom forged tools?'))return;
+   customTools=[];
+   saveCustomTools();
+   filesUI();
    return;
  }
  if(t.closest('#cmp-status')){const m=$('#cmp-m');m.style.color='var(--fg-2)';m.textContent='Checking…';try{const r=JSON.parse(await nat('compiler_status',{}));m.style.color=r.data&&r.data.ready?'var(--success)':'var(--danger)';m.textContent=r.text;$('#cmp-s').textContent=r.text}catch(x){m.style.color='var(--danger)';m.textContent=x.message}return}
