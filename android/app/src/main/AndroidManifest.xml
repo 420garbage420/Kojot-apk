@@ -21,5 +21,12 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
-    </application>
+    
+        <provider
+            android:name="com.kojot.app.KojotFileProvider"
+            android:authorities="${applicationId}.provider"
+            android:exported="false"
+            android:grantUriPermissions="true" />
+
+</application>
 </manifest>

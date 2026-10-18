@@ -364,7 +364,7 @@ class MainActivity : Activity() {
                     if (f.absolutePath != pub.absolutePath) {
                         f.copyTo(pub, overwrite = true)
                     }
-                    val uri = Uri.fromFile(pub)
+                    val uri = Uri.parse("content://$packageName.provider${pub.absolutePath}")
                     val intent = Intent(Intent.ACTION_VIEW).apply {
                         setDataAndType(uri, "application/vnd.android.package-archive")
                         addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)

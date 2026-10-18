@@ -249,10 +249,13 @@ class FileTools(rootDir: File) {
         if (count == 0) {
             val normSearch = search.replace("\r\n", "\n")
             val normRaw = raw.replace("\r\n", "\n")
-            if (normRaw.indexOf(normSearch) < 0)
+            val idx = normRaw.indexOf(normSearch)
+            if (idx < 0)
                 throw ToolError("search block not found in ${rel(f)}")
-            // Found after CRLF normalization — still refuse to avoid silent mismatch on write-back
-            throw ToolError("search block not found with exact line endings in ${rel(f)} (CRLF/LF mismatch)")
+            val normReplace = replace.replace("\r\n", "\n")
+            val updated = normRaw.replaceFirst(normSearch, normReplace)
+            f.writeText(updated, Charsets.UTF_8)
+            return result("edited ${rel(f)} (applied with normalized line endings)")
         }
         if (count > 1)
             throw ToolError("search block appears $count times; provide more surrounding lines")
