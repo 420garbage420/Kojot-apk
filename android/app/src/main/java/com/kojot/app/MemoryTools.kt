@@ -1,3 +1,13 @@
+data class IndexStatus(
+    var running: Boolean = false,
+    var total: Int = 0,
+    var current: Int = 0,
+    var indexed: Int = 0,
+    var skipped: Int = 0,
+    var currentFile: String = "",
+    var cancelled: Boolean = false,
+    var error: String? = null
+)
 package com.kojot.app
 
 import android.database.sqlite.SQLiteDatabase
@@ -19,16 +29,12 @@ import kotlin.math.sqrt
  * - Hybrid recall: FTS5 BM25 + cosine similarity fused via Reciprocal Rank Fusion
  * - Hard cap: recall output ≤ 1600 chars (~400 tokens)
  */
-    data class IndexStatus(
-        var running: Boolean = false,
-        var total: Int = 0,
-        var current: Int = 0,
-        var indexed: Int = 0,
-        var skipped: Int = 0,
-        var currentFile: String = "",
-        var cancelled: Boolean = false,
-        var error: String? = null
-    )
+class MemoryTools(private val dbFile: File, private val workspace: () -> File) {
+    private val db: SQLiteDatabase = SQLiteDatabase.openOrCreateDatabase(dbFile, null)
+    private val embUrl = "http://127.0.0.1:8081/v1/embeddings"
+    @Volatile var embOnline: Boolean = false
+        private set
+
     val indexStatus = IndexStatus()
 
     fun getIndexingStatus(): JSONObject = JSONObject()
@@ -77,7 +83,7 @@ import kotlin.math.sqrt
                             continue
                         }
                         if (isTextFile(k)) candidates.add(k)
-                    } 
+                    }
                 }
                 collect(root, 0)
                 indexStatus.total = candidates.size
@@ -111,11 +117,6 @@ import kotlin.math.sqrt
         return JSONObject().put("text", "indexing started").put("data", getIndexingStatus())
     }
 
-class MemoryTools(private val dbFile: File, private val workspace: () -> File) {
-    private val db: SQLiteDatabase = SQLiteDatabase.openOrCreateDatabase(dbFile, null)
-    private val embUrl = "http://127.0.0.1:8081/v1/embeddings"
-    @Volatile var embOnline: Boolean = false
-        private set
 
     init {
         db.enableWriteAheadLogging()

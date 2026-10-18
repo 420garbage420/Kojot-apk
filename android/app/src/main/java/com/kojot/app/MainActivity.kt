@@ -409,11 +409,12 @@ class MainActivity : Activity() {
         in memoryOps -> {
             if (op == "start_indexing") {
                 acquireWakeLock()
-                return mem().startIndexing(a.optBoolean("force", false), a.optInt("max", 10000)) {
+                mem().startIndexing(a.optBoolean("force", false), a.optInt("max", 10000)) {
                     releaseWakeLock()
                 }
+            } else {
+                mem().run(op, a)
             }
-            mem().run(op, a)
         }
         in compilerOps -> {
             val tools = File(filesDir, "compiler_tools")
