@@ -113,7 +113,13 @@ class FileTools(rootDir: File) {
     fun read(a: JSONObject): JSONObject {
         val f = safe(a.optString("path"))
         if (!f.isFile) throw ToolError("not a file: ${rel(f)}")
-        val max = a.optInt("max_chars", 3000).coerceIn(200, 8000)
+        if (a.optBoolean("full", false)) {
+                    if (f.length() > 10L * 1024 * 1024) throw ToolError("file too large (>10MB)")
+                    val bytes = f.readBytes()
+                    if (bytes.any { it.toInt() == 0 }) return result("${rel(f)} is a binary file (${sz(f.length())}); not shown.")
+                    return result(String(bytes, Charsets.UTF_8))
+                }
+                val max = a.optInt("max_chars", 3000).coerceIn(200, 8000)
         val buf = ByteArray(minOf(f.length(), 32768L).toInt())
         val n = f.inputStream().use { it.read(buf) }
         val b = buf.copyOf(maxOf(n, 0))

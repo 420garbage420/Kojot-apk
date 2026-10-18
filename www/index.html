@@ -1160,7 +1160,7 @@ async function edRenderBrowser(){
       row.onclick=async()=>{
         if(e.d){edPath=e.p;edRenderBrowser();return}
         try{
-          const raw=await nat('read_file',{path:e.p,max_chars:8000});
+          const raw=await nat('read_file',{path:e.p,full:true});
           const j=JSON.parse(raw);const text=j.text||'';
           // If truncated, re-read without limit via a full write path — use max 8000 for safety in editor seed
           if(!ed)initMonaco();
@@ -1180,6 +1180,10 @@ $('#ed-fb-up')?.addEventListener('click',()=>{const parts=edPath.split('/').filt
 $('#ed-btn-save')?.addEventListener('click',async()=>{
   edBuzz();if(!ed)return;
   const path=edFile||'untitled.txt';
+  if(ed.getValue().includes('\n…(truncated; file is')){
+    edToast('Cannot save truncated file! Aborting to prevent data loss.','error',4000);
+    return;
+  }
   try{
     await nat('write_file',{path,content:ed.getValue(),overwrite:true});
     setEdDirty(false);edToast('Saved '+path,'ok');
