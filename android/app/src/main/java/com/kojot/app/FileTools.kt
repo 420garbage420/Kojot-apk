@@ -120,14 +120,29 @@ class FileTools(rootDir: File) {
                     return result(String(bytes, Charsets.UTF_8))
                 }
                 val max = a.optInt("max_chars", 3000).coerceIn(200, 8000)
-        val buf = ByteArray(minOf(f.length(), 32768L).toInt())
-        val n = f.inputStream().use { it.read(buf) }
+        val offset = a.optLong("offset", 0L).coerceAtLeast(0L)
+        val fileLen = f.length()
+        if (offset >= fileLen && fileLen > 0L) {
+            return result("EOF: offset $offset is beyond file size (${sz(fileLen)})", JSONObject().put("eof", true).put("total", fileLen))
+        }
+        val buf = ByteArray(minOf(fileLen - offset, 32768L).toInt())
+        val n = f.inputStream().use {
+            if (offset > 0L) it.skip(offset)
+            it.read(buf)
+        }
         val b = buf.copyOf(maxOf(n, 0))
-        if (b.any { it.toInt() == 0 }) return result("${rel(f)} is a binary file (${sz(f.length())}); not shown.")
+        if (b.any { it.toInt() == 0 }) return result("${rel(f)} is a binary file (${sz(fileLen)}); not shown.")
         val full = String(b, Charsets.UTF_8)
         val shown = full.take(max)
-        val cut = shown.length < full.length || f.length() > b.size
-        return result(shown + if (cut) "\n…(truncated; file is ${sz(f.length())})" else "")
+        val nextOffset = offset + shown.toByteArray(Charsets.UTF_8).size
+        val hasMore = nextOffset < fileLen
+        val notice = if (hasMore) "\n…[more content: next offset=$nextOffset, total=${sz(fileLen)}]" else ""
+        val data = JSONObject()
+            .put("offset", offset)
+            .put("next_offset", nextOffset)
+            .put("total_bytes", fileLen)
+            .put("has_more", hasMore)
+        return result(shown + notice, data)
     }
 
     // ---- changes (file_ops.py) -----------------------------------------------------------------

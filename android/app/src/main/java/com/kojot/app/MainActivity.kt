@@ -435,7 +435,22 @@ class MainActivity : Activity() {
         }
     }
 
-    inner class Bridge {
+    @Volatile private var backActive = false
+
+@Deprecated("Deprecated in Java")
+override fun onBackPressed() {
+    if (backActive) {
+        runOnUiThread { web.evaluateJavascript("window.__goBack()", null) }
+    } else {
+        super.onBackPressed()
+    }
+}
+
+inner class Bridge {
+    @JavascriptInterface
+    fun setBackActive(active: Boolean) {
+        backActive = active
+    }
         @JavascriptInterface
         fun info(): String {
             memory?.checkEmbedding()

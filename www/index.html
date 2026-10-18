@@ -438,7 +438,7 @@ const FT=[
  fn('get_vitals','Check real-time device health diagnostics: battery level, battery temperature, thermal throttling state, free system RAM, Kojot memory footprint, and available storage.',{},[]),
  fn('list_dir','List files and folders in a directory.',{path:S('Folder relative to the workspace root. Default "."'),sort:P('string','name, size or date',{enum:['name','size','date']}),limit:Nn('Max entries (default 60)'),offset:Nn('Skip this many entries'),hidden:B('Include dot-files')}),
  fn('find_files','Find files or folders by name under a folder. * and ? wildcards work, e.g. "*.pdf".',{query:S('Name or wildcard pattern'),path:S('Folder to search. Default "."'),max:Nn('Max results (default 40)')},['query']),
- fn('read_file','Read the start of a text file.',{path:S('File path'),max_chars:Nn('Default 3000')},['path']),
+ fn('read_file','Read a text file in chunks. Use offset to page through large files.',{path:S('File path'),max_chars:Nn('Characters to read (200-8000, default 3000)'),offset:Nn('Byte offset to start reading from (default 0)')},['path']),
  fn('make_dir','Create folders (parents are created too).',{paths:AR('Folder paths')},['paths']),
  fn('move','Move or rename files or folders. End dst with / when it is a folder.',{src:AR('Paths to move'),dst:S('Destination path'),overwrite:B('Replace existing. Default false')},['src','dst']),
  fn('copy','Copy files or folders. End dst with / when it is a folder.',{src:AR('Paths to copy'),dst:S('Destination path'),overwrite:B('Replace existing. Default false')},['src','dst']),
@@ -828,7 +828,49 @@ async function run(c){setBusy(true);stopped=false;let steps=0;
  busy=false;ctrl=null;gate.clear();_sysMem=null;const l=c.messages.at(-1);if(l&&l.role==='assistant'&&!l.content&&!l.error&&!(l.calls&&l.calls.length))c.messages.pop();save();setBusy(false);render()}
 function send(t){t=t.trim();if(!t||busy)return;const c=cur()||fresh();c.messages.push({role:'user',content:t,ts:Date.now()},{role:'assistant',content:'',ts:Date.now()});if(!c.title)c.title=t.slice(0,42);$('#in').value='';grow();save();run(c)}
 function grow(){const e=$('#in');e.style.height='auto';e.style.height=Math.min(e.scrollHeight,168)+'px';$('#go').disabled=!busy&&!e.value.trim()}
-function drawer(o){$('#sb').classList.toggle('open',o);$('#scrim').classList.toggle('open',o)}
+window.syncBack = function() {
+  const active = !!(
+    $('#editor-view')?.classList.contains('on') ||
+    $('#ss')?.classList.contains('open') ||
+    $('#sb')?.classList.contains('open') ||
+    $('#ed-fbrowser')?.classList.contains('open') ||
+    $('#ed-ai-sheet')?.classList.contains('open') ||
+    $('#ed-find')?.classList.contains('open')
+  );
+  if (window.Native && Native.setBackActive) {
+    try { Native.setBackActive(active); } catch(_) {}
+  }
+};
+window.__goBack = function() {
+  if ($('#ed-ai-sheet')?.classList.contains('open')) {
+    $('#ed-ai-sheet').classList.remove('open');
+    $('#ed-ai-bd').classList.remove('open');
+    syncBack(); return true;
+  }
+  if ($('#ed-fbrowser')?.classList.contains('open')) {
+    $('#ed-fbrowser').classList.remove('open');
+    syncBack(); return true;
+  }
+  if ($('#ed-find')?.classList.contains('open')) {
+    $('#ed-find').classList.remove('open');
+    syncBack(); return true;
+  }
+  if ($('#editor-view')?.classList.contains('on')) {
+    showEditor(false);
+    syncBack(); return true;
+  }
+  if ($('#ss')?.classList.contains('open')) {
+    done();
+    syncBack(); return true;
+  }
+  if ($('#sb')?.classList.contains('open')) {
+    drawer(false);
+    syncBack(); return true;
+  }
+  syncBack(); return false;
+};
+function drawer(o){
+  setTimeout(syncBack, 10);$('#sb').classList.toggle('open',o);$('#scrim').classList.toggle('open',o)}
 async function ping(){const d=$('#dot');d.className='wait';$('#sub').textContent='';try{const r=await fetch(cfg.url.replace(/\/$/,'')+'/health',{signal:AbortSignal.timeout(4000)});if(!r.ok)throw 0;d.className='ok';
   let emb='';
   try{ninfo();if(NI&&NI.embed)emb=' · mem✓';else if(NI&&NI.embed_model)emb=' · mem…'}catch(_){}
@@ -974,7 +1016,8 @@ if(!$('#fs-t'))return;ninfo();const ok=NI&&NI.files;$('#fs-t').textContent=!NI?'
  if($('#mem-s')){nat('memory_stats',{}).then(raw=>{try{const r=JSON.parse(raw);$('#mem-s').textContent=r.text;if($('#mem-m'))$('#mem-m').textContent=''}catch(_){}}).catch(()=>{});
   nat('get_user_anchor',{}).then(raw=>{try{const r=JSON.parse(raw);if($('#mem-anchor'))$('#mem-anchor').value=r.text||(r.data&&r.data.anchor)||''}catch(_){}}).catch(()=>{})}
 }
-function sheet(o){$('#ss').classList.toggle('open',o);if(o){drawer(false);ninfo();buildSettings()}}
+function sheet(o){
+  setTimeout(syncBack, 10);$('#ss').classList.toggle('open',o);if(o){drawer(false);ninfo();buildSettings()}}
 function done(){saveCfg();sheet(false);ping()}
 $('#s-body').addEventListener('input',e=>{const el=e.target.closest('[data-k]');if(!el)return;const t=el.dataset.t,key=el.dataset.k;let v=el.value;
  if(t==='num'||t==='int'||t==='sel'){v=v===''?undefined:+v;if(Number.isNaN(v))v=undefined}else if(t==='tf')v=v===''?undefined:v==='true';else if(v===''&&/^(p|srv)\./.test(key))v=undefined;
@@ -1106,6 +1149,7 @@ function edToast(msg,kind,ms){kind=kind||'info';ms=ms||2200;const stack=$('#ed-t
 function edLang(name){const e=(name.split('.').pop()||'').toLowerCase();return({html:'html',htm:'html',js:'javascript',mjs:'javascript',ts:'typescript',css:'css',json:'json',md:'markdown',py:'python',yaml:'yaml',yml:'yaml'})[e]||'plaintext'}
 function setEdDirty(s){edDirty=s;$('#ed-dirty').classList.toggle('on',!!s)}
 function showEditor(on){
+  setTimeout(syncBack, 10);
   $('#editor-view').classList.toggle('on',on);
   document.querySelector('.main')?.classList.toggle('hidden-for-ed',on);
   document.querySelectorAll('.ed-nav').forEach(b=>b.classList.toggle('on',on));
