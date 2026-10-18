@@ -58,7 +58,11 @@ class MainActivity : Activity() {
         setContentView(FrameLayout(this).apply {
             setBackgroundColor(0xFF202020.toInt()); addView(msg); addView(web)
         })
-        memory = MemoryTools(File(filesDir, "memory.db")) { rootDir() }
+        try {
+            memory = MemoryTools(File(filesDir, "memory.db")) { rootDir() }
+        } catch (e: Exception) {
+            Log.e("Kojot", "Memory init failed: ${e.message}")
+        }
         // Extract on-device APK compiler binaries (aapt2, android.jar, shell dex, keystore)
         thread {
             try {
