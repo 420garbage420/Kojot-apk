@@ -931,6 +931,24 @@ function edClearHL(){if(ed&&edDecos.length)edDecos=ed.deltaDecorations(edDecos,[
 function edUnlock(fn){const was=ed?ed.getOption(monaco.editor.EditorOption.readOnly):false;if(ed)ed.updateOptions({readOnly:false});try{return fn()}finally{if(ed&&was)ed.updateOptions({readOnly:true})}}
 function edLock(v){if(ed)ed.updateOptions({readOnly:!!v})}
 
+
+function edCheckSyntax(code, file){
+  if(!code || !file) return null;
+  const ext = (file.split(".").pop() || "").toLowerCase();
+  try {
+    if(ext === "json") JSON.parse(code);
+    else if(ext === "js" || ext === "mjs") new Function(code);
+    else if(ext === "xml" || ext === "html" || ext === "htm") {
+      const d = new DOMParser().parseFromString(code, "application/xml");
+      const pe = d.querySelector("parsererror");
+      if(pe) return (pe.textContent || "XML parse error").split("\n")[0].slice(0, 80);
+    }
+  } catch(e) {
+    return (e.message || "Syntax error").slice(0, 100);
+  }
+  return null;
+}
+
 async function edExecuteStep(heal){
   edClearHL();
   const instruction=edSteps[edIdx];
@@ -978,12 +996,14 @@ Rules: 1. search must be EXACT unique copy from buffer. 2. Empty buffer: search 
     const before=ed.getValue();
     edUnlock(()=>ed.executeEdits('ai',[{range:ed.getModel().getFullModelRange(),text:work,forceMoveMarkers:true}]));
     if(ed.getValue()===before&&work!==before)throw new Error('Edit did not modify buffer');
+    const syntaxErr = edCheckSyntax(work, edFile);
+    if(syntaxErr) throw new Error('Syntax check failed: ' + syntaxErr);
     // highlight first changed region roughly
     const a=edBackup.split('\n'),b=work.split('\n');let s=0;while(s<a.length&&s<b.length&&a[s]===b[s])s++;
     const end=Math.min(Math.max(s+1,1),ed.getModel().getLineCount());
     const range=new monaco.Range(s+1,1,end,ed.getModel().getLineMaxColumn(end));
     ed.revealRangeInCenter(range);edHighlight(range);edBuzz();
-    $('#ed-rstat').textContent=heal?'Self-healed ✓':'Applied ✓';
+    $('#ed-rstat').textContent=heal?'Self-healed (Syntax Clean) ✓':'Applied (Syntax Clean) ✓';
     $('#ed-rstat').style.color='var(--cyan)';
     $('#ed-g-confirm').disabled=false;$('#ed-g-retry').disabled=false;$('#ed-g-manual').disabled=false;
     $('#ed-g-confirm').textContent=edIdx===edSteps.length-1?'Finish Chain':'Confirm & Next';
