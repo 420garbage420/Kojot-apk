@@ -460,7 +460,7 @@ class CompilerTools(private val context: Context, private val toolsDir: File) {
 
     companion object {
         /**
-         * Extract assets/compiler_tools/* into [dest] on first launch and mark binaries executable.
+         * Extract assets/compiler_tools/ into [dest] on first launch and mark binaries executable.
          */
         fun ensureExtracted(context: Context, dest: File) {
             if (File(dest, ".extracted").isFile) return
