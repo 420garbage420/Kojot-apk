@@ -33,6 +33,16 @@ class MainActivity : Activity() {
     private val embModel get() = File(filesDir, "nomic.gguf")
     private val prefs by lazy { getSharedPreferences("lc", Context.MODE_PRIVATE) }
     private var memory: MemoryTools? = null
+
+    /** Open the memory DB lazily and report the real error if it fails. */
+    @Synchronized private fun mem(): MemoryTools {
+        memory?.let { return it }
+        try {
+            return MemoryTools(File(filesDir, "memory.db")) { rootDir() }.also { memory = it }
+        } catch (e: Throwable) {
+            throw ToolError("memory engine failed to start: ${e.javaClass.simpleName}: ${e.message}")
+        }
+    }
     @Volatile private var embReady = false
 
     override fun onCreate(b: Bundle?) {
@@ -124,7 +134,7 @@ class MainActivity : Activity() {
                     if (r == REQ_MODEL) start()
                     else {
                         // Restart only the embedding process
-                        startEmbedding(File(applicationInfo.nativeLibraryDir, "libllama_server.so"))
+                        thread { startEmbedding(File(applicationInfo.nativeLibraryDir, "libllama_server.so")) }
                         msg.text = if (web.visibility == View.VISIBLE) msg.text else "Embedding model installed. Restarting embed server…"
                         if (web.visibility == View.VISIBLE) {
                             // already in chat UI — nothing else to do
@@ -333,8 +343,7 @@ class MainActivity : Activity() {
             JSONObject().put("text", "picker opened")
         }
         in memoryOps -> {
-            val m = memory ?: throw ToolError("memory engine unavailable")
-            m.run(op, a)
+            mem().run(op, a)
         }
         in compilerOps -> {
             val tools = File(filesDir, "compiler_tools")
