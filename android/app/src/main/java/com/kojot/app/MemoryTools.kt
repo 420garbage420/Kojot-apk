@@ -1,13 +1,3 @@
-data class IndexStatus(
-    var running: Boolean = false,
-    var total: Int = 0,
-    var current: Int = 0,
-    var indexed: Int = 0,
-    var skipped: Int = 0,
-    var currentFile: String = "",
-    var cancelled: Boolean = false,
-    var error: String? = null
-)
 package com.kojot.app
 
 import android.database.sqlite.SQLiteDatabase
@@ -20,6 +10,17 @@ import java.net.URL
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import kotlin.math.sqrt
+
+data class IndexStatus(
+    var running: Boolean = false,
+    var total: Int = 0,
+    var current: Int = 0,
+    var indexed: Int = 0,
+    var skipped: Int = 0,
+    var currentFile: String = "",
+    var cancelled: Boolean = false,
+    var error: String? = null
+)
 
 /**
  * Edge Memory Architecture for Kojot.
@@ -117,7 +118,6 @@ class MemoryTools(private val dbFile: File, private val workspace: () -> File) {
         return JSONObject().put("text", "indexing started").put("data", getIndexingStatus())
     }
 
-
     init {
         db.enableWriteAheadLogging()
         db.execSQL(
@@ -175,7 +175,6 @@ class MemoryTools(private val dbFile: File, private val workspace: () -> File) {
     fun setUserAnchor(a: JSONObject): JSONObject {
         val text = a.optString("text", a.optString("anchor", "")).trim()
         if (text.isEmpty()) throw ToolError("anchor text is required")
-        // Cap at ~80 tokens ≈ 320 chars
         val clipped = text.take(320)
         setMeta("user_anchor", clipped)
         return result("anchor saved (${clipped.length} chars)")
@@ -193,7 +192,6 @@ class MemoryTools(private val dbFile: File, private val workspace: () -> File) {
         return embOnline
     }
 
-    /** L2-normalized float embedding, or null if server offline / error. */
     fun getEmbedding(text: String): FloatArray? {
         if (!embOnline && !checkEmbedding()) return null
         return try {
@@ -238,7 +236,6 @@ class MemoryTools(private val dbFile: File, private val workspace: () -> File) {
         }
     }
 
-    /** If the embedding model changed (different vector size), old vectors are meaningless: drop them. */
     private fun reconcileDim(n: Int) {
         val prev = getMeta("emb_dim")?.toIntOrNull()
         if (prev == n) return
@@ -269,7 +266,7 @@ class MemoryTools(private val dbFile: File, private val workspace: () -> File) {
         if (n == 0) return 0f
         var dot = 0f
         for (i in 0 until n) dot += a[i] * b[i]
-        return dot // already unit-normalized
+        return dot
     }
 
     // ---- facts ----------------------------------------------------------------------------
@@ -277,7 +274,6 @@ class MemoryTools(private val dbFile: File, private val workspace: () -> File) {
         val tag = a.optString("tag", "NOTE").trim().uppercase().take(24).ifEmpty { "NOTE" }
         var content = a.optString("content", "").trim()
         if (content.isEmpty()) throw ToolError("content is required")
-        // Telegraphic: hard-cap ~20 words / 120 chars
         content = content.split(Regex("\\s+")).take(20).joinToString(" ").take(120)
         val vec = getEmbedding("[$tag] $content")
         val now = System.currentTimeMillis()
@@ -288,20 +284,14 @@ class MemoryTools(private val dbFile: File, private val workspace: () -> File) {
         return result("saved [$tag] $content")
     }
 
-    /**
-     * Hybrid recall: FTS5 BM25 ranks + vector cosine ranks fused with RRF.
-     * Output hard-capped at 1600 characters (~400 tokens).
-     */
     fun recallMemory(a: JSONObject): JSONObject {
         val query = a.optString("query", "").trim()
         val limit = a.optInt("limit", 6).coerceIn(1, 12)
         if (query.isEmpty()) return result("(no query)", JSONObject().put("facts", JSONArray()))
 
         data class Hit(val id: Long, val tag: String, val content: String, var score: Double)
-
         val byId = LinkedHashMap<Long, Hit>()
 
-        // --- Keyword matching ---
         val tokens = query.split(Regex("\\s+")).filter { it.length > 1 }
         for (t in tokens) {
             try {
@@ -320,7 +310,6 @@ class MemoryTools(private val dbFile: File, private val workspace: () -> File) {
             }
         }
 
-        // --- Vector cosine ---
         val qVec = getEmbedding(query)
         if (qVec != null) {
             val scored = ArrayList<Pair<Long, Float>>()
@@ -341,7 +330,6 @@ class MemoryTools(private val dbFile: File, private val workspace: () -> File) {
             }
         }
 
-        // Fallback: recent facts if nothing matched
         if (byId.isEmpty()) {
             db.rawQuery(
                 "SELECT id, tag, content FROM facts ORDER BY created_at DESC LIMIT ?",
@@ -356,7 +344,7 @@ class MemoryTools(private val dbFile: File, private val workspace: () -> File) {
         val ranked = byId.values.sortedByDescending { it.score }.take(limit)
         val lines = ArrayList<String>()
         var chars = 0
-        val maxChars = 1600 // ~400 tokens
+        val maxChars = 1600
         val arr = JSONArray()
         for (h in ranked) {
             val line = "[${h.tag}] ${h.content}"
@@ -401,7 +389,6 @@ class MemoryTools(private val dbFile: File, private val workspace: () -> File) {
         }
         val n = db.compileStatement("SELECT COUNT(*) FROM facts").simpleQueryForLong()
         db.execSQL("DELETE FROM facts")
-        // rebuild empty fts
         try { db.execSQL("INSERT INTO facts_fts(facts_fts) VALUES('rebuild')") } catch (_: Exception) {}
         return result("cleared $n facts")
     }
@@ -519,7 +506,6 @@ class MemoryTools(private val dbFile: File, private val workspace: () -> File) {
         val qLower = query.lowercase()
         val tokens = qLower.split(Regex("[^a-z0-9_./-]+")).filter { it.length > 1 }
 
-        // Path / snippet token match
         db.rawQuery("SELECT path, snippet FROM file_index", null).use { c ->
             while (c.moveToNext()) {
                 val path = c.getString(0)
@@ -531,7 +517,6 @@ class MemoryTools(private val dbFile: File, private val workspace: () -> File) {
             }
         }
 
-        // Vector ranking
         val qVec = getEmbedding(query)
         if (qVec != null) {
             val scored = ArrayList<Triple<String, String, Float>>()

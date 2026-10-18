@@ -24,6 +24,16 @@ import java.net.URL
 import kotlin.concurrent.thread
 
 class MainActivity : Activity() {
+    private var proc: Process? = null
+    private var embProc: Process? = null
+    private var tap: (() -> Unit)? = null
+    private lateinit var msg: TextView
+    private lateinit var web: WebView
+    private val model get() = File(filesDir, "model.gguf")
+    private val embModel get() = File(filesDir, "nomic.gguf")
+    private val prefs by lazy { getSharedPreferences("lc", Context.MODE_PRIVATE) }
+    private var memory: MemoryTools? = null
+
     private var wakeLock: android.os.PowerManager.WakeLock? = null
     private fun acquireWakeLock() {
         try {
@@ -36,15 +46,16 @@ class MainActivity : Activity() {
         try { if (wakeLock?.isHeld == true) wakeLock?.release() } catch (_: Exception) {}
     }
 
-    private var proc: Process? = null
-    private var embProc: Process? = null
-    private var tap: (() -> Unit)? = null
-    private lateinit var msg: TextView
-    private lateinit var web: WebView
-    private val model get() = File(filesDir, "model.gguf")
-    private val embModel get() = File(filesDir, "nomic.gguf")
-    private val prefs by lazy { getSharedPreferences("lc", Context.MODE_PRIVATE) }
-    private var memory: MemoryTools? = null
+    @Volatile private var backActive = false
+
+    @Deprecated("Deprecated in Java")
+    override fun onBackPressed() {
+        if (backActive) {
+            runOnUiThread { web.evaluateJavascript("window.__goBack()", null) }
+        } else {
+            super.onBackPressed()
+        }
+    }
 
     /** Open the memory DB lazily and report the real error if it fails. */
     @Synchronized private fun mem(): MemoryTools {
@@ -85,7 +96,6 @@ class MainActivity : Activity() {
         } catch (e: Exception) {
             Log.e("Kojot", "Memory init failed: ${e.message}")
         }
-        // Extract on-device APK compiler binaries (aapt2, android.jar, shell dex, keystore)
         thread {
             try {
                 CompilerTools.ensureExtracted(this@MainActivity, File(filesDir, "compiler_tools"))
@@ -96,7 +106,6 @@ class MainActivity : Activity() {
         if (model.exists()) start() else pickModel()
     }
 
-    // ---- model pickers ----------------------------------------------------------------------
     private fun pickModel() {
         tap = { pickModel() }
         msg.text = "Tap to choose your model (.gguf file).\nAny GGUF model works — it's loaded locally.\nCopied into the app once (needs free space equal to the file size)."
@@ -145,12 +154,8 @@ class MainActivity : Activity() {
                 runOnUiThread {
                     if (r == REQ_MODEL) start()
                     else {
-                        // Restart only the embedding process
                         thread { startEmbedding(File(applicationInfo.nativeLibraryDir, "libllama_server.so")) }
                         msg.text = if (web.visibility == View.VISIBLE) msg.text else "Embedding model installed. Restarting embed server…"
-                        if (web.visibility == View.VISIBLE) {
-                            // already in chat UI — nothing else to do
-                        }
                     }
                 }
             } catch (e: Exception) {
@@ -159,7 +164,6 @@ class MainActivity : Activity() {
         }
     }
 
-    // ---- llama-server -----------------------------------------------------------------------
     private fun serverArgs(exe: String, www: String): List<String> {
         val s = try { JSONObject(prefs.getString("srv", "{}") ?: "{}") } catch (_: Exception) { JSONObject() }
         val a = mutableListOf(exe, "-m", model.path, "--host", "127.0.0.1", "--port", "8080", "--path", www, "--jinja")
@@ -193,7 +197,6 @@ class MainActivity : Activity() {
         start(old, oldEmb)
     }
 
-    /** Recursively copy an assets folder into [dest]. Supports the offline Monaco tree under assets/www/. */
     private fun copyAssetDir(assetPath: String, dest: File) {
         val list = assets.list(assetPath) ?: emptyArray()
         if (list.isEmpty()) {
@@ -257,8 +260,6 @@ class MainActivity : Activity() {
             else assets.open("index.html").use { i -> File(www, "index.html").outputStream().use { i.copyTo(it) } }
 
             val exe = File(applicationInfo.nativeLibraryDir, "libllama_server.so")
-
-            // Launch embedding server in parallel (optional)
             startEmbedding(exe)
 
             val p = ProcessBuilder(serverArgs(exe.path, www.path)).redirectErrorStream(true).start()
@@ -290,7 +291,6 @@ class MainActivity : Activity() {
         }
     }
 
-    // ---- JS bridge --------------------------------------------------------------------------
     private fun filesOk(): Boolean = if (Build.VERSION.SDK_INT >= 30) Environment.isExternalStorageManager() else true
     private fun base(): String = Environment.getExternalStorageDirectory().path
     private fun rootDir(): File = File(prefs.getString("root", null) ?: base())
@@ -323,11 +323,11 @@ class MainActivity : Activity() {
 
     private val memoryOps = setOf(
         "save_fact", "recall_memory", "recall_files", "sync_file_index",
+        "start_indexing", "get_indexing_status", "cancel_indexing",
         "list_facts", "clear_facts", "memory_stats", "get_user_anchor", "set_user_anchor"
     )
     private val compilerOps = setOf("compile_app", "compiler_status")
 
-    
     private fun getVitals(): JSONObject {
         val ifilter = android.content.IntentFilter(android.content.Intent.ACTION_BATTERY_CHANGED)
         val bStatus = registerReceiver(null, ifilter)
@@ -429,8 +429,6 @@ class MainActivity : Activity() {
                 throw ToolError("APK not found: $path")
             runOnUiThread {
                 try {
-                    // Copy into cache and use content:// via a simple openFile approach is heavy;
-                    // use ACTION_VIEW with FileProvider-free stream via public Downloads copy.
                     val pub = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), f.name)
                     if (f.absolutePath != pub.absolutePath) {
                         f.copyTo(pub, overwrite = true)
@@ -454,22 +452,12 @@ class MainActivity : Activity() {
         }
     }
 
-    @Volatile private var backActive = false
+    inner class Bridge {
+        @JavascriptInterface
+        fun setBackActive(active: Boolean) {
+            backActive = active
+        }
 
-@Deprecated("Deprecated in Java")
-override fun onBackPressed() {
-    if (backActive) {
-        runOnUiThread { web.evaluateJavascript("window.__goBack()", null) }
-    } else {
-        super.onBackPressed()
-    }
-}
-
-inner class Bridge {
-    @JavascriptInterface
-    fun setBackActive(active: Boolean) {
-        backActive = active
-    }
         @JavascriptInterface
         fun info(): String {
             memory?.checkEmbedding()
@@ -498,6 +486,7 @@ inner class Bridge {
         proc?.destroy()
         embProc?.destroy()
         memory?.close()
+        releaseWakeLock()
         super.onDestroy()
     }
 
