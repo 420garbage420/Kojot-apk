@@ -314,6 +314,14 @@ textarea.in{height:auto;min-height:64px;padding:9px 12px;font:13px/19px var(--mo
   <div class="scroll" id="sc"><div class="thread" id="th"></div></div>
   <footer class="dock">
    <div class="comp">
+    <div id="img-preview" style="display:none;position:relative;margin:4px 6px">
+      <img id="img-thumb" style="width:48px;height:48px;border-radius:8px;object-fit:cover;border:1px solid var(--line)">
+      <button id="img-rm" style="position:absolute;top:-4px;left:40px;background:var(--bg-elevated);border:1px solid var(--line);border-radius:50%;width:18px;height:18px;font-size:10px;line-height:16px;text-align:center;color:var(--fg);cursor:pointer">✕</button>
+    </div>
+    <button class="ib" id="img-btn" aria-label="Attach Image" title="Attach image" style="display:none;align-self:flex-end;width:38px;height:38px;color:var(--fg-2)">
+      <svg viewBox="0 0 24 24" style="width:20px;height:20px"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>
+    </button>
+    <input type="file" id="img-file" accept="image/*" style="display:none">
     <textarea id="in" rows="1" placeholder="Message Kojot…" enterkeyhint="send"></textarea>
     <button class="send" id="go" aria-label="Send" disabled><svg viewBox="0 0 24 24"><path d="M12 19V5M5 12l7-7 7 7"/></svg></button>
    </div>
@@ -397,7 +405,7 @@ textarea.in{height:auto;min-height:64px;padding:9px 12px;font:13px/19px var(--mo
 </div></div>
 <script>
 const $=s=>document.querySelector(s),LS=localStorage,J=JSON;
-const DEF={url:'http://127.0.0.1:8080',sys:'You are a helpful, concise assistant.',t:.7,m:1024,theme:'auto',power:false,thoughts:true,files:true,ask:true,github:{token:'',repo:'420garbage420/kojot'},search:{on:true,prov:'tavily',keys:{},max:5,depth:'basic',sx:'',cu:'',cm:'GET',ch:'',cb:''},p:{},srv:{},xj:''};
+const DEF={url:'http://127.0.0.1:8080',sys:'You are a helpful, concise assistant.',t:.7,m:1024,theme:'auto',power:false,thoughts:true,vision:false,files:true,ask:true,github:{token:'',repo:'420garbage420/kojot'},search:{on:true,prov:'tavily',keys:{},max:5,depth:'basic',sx:'',cu:'',cm:'GET',ch:'',cb:''},p:{},srv:{},xj:''};
 const saved=(()=>{try{return J.parse(LS.getItem('lc.cfg')||'{}')}catch{return{}}})();
 const cfg={...DEF,...saved,search:{...DEF.search,...saved.search,keys:{...(saved.search||{}).keys}},p:{...saved.p},srv:{...saved.srv}};
 let chats=(()=>{try{return J.parse(LS.getItem('lc.chats')||'[]')}catch{return[]}})(),cid=LS.getItem('lc.cur')||null,busy=false,ctrl=null,stopped=false,NI;
@@ -568,7 +576,9 @@ function render(){const c=cur(),th=$('#th');th.innerHTML='';
  if(c&&!primed.has(c.id)){c.messages.forEach(m=>(m.calls||[]).forEach(k=>shown.set(k.id,k.state)));primed.add(c.id)}
  if(!c||!c.messages.length)th.innerHTML=`<div class="hero">${BLOOM}<h1>What's on your mind?</h1><p>Private, on-device, offline.</p><div class="chips">${SUG.map(s=>`<button class="chip">${s}</button>`).join('')}</div></div>`;
  else c.messages.forEach((m,i)=>{const d=document.createElement('div');
-  if(m.role==='user'){d.className='turn u';const tStr=m.ts?new Date(m.ts).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}):'';d.innerHTML=`<div>${esc(m.content)}</div>${tStr?`<time class="ts">${tStr}</time>`:''}`}
+  if(m.role==='user'){d.className='turn u';const tStr=m.ts?new Date(m.ts).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}):'';
+  const imgH=m.image?`<img src="${ea(m.image)}" style="max-width:160px;max-height:160px;border-radius:10px;margin-bottom:6px;display:block">`:'';
+  d.innerHTML=`${imgH}<div>${esc(m.content)}</div>${tStr?`<time class="ts">${tStr}</time>`:''}`}
   else{d.className='turn a';d.innerHTML=turnHTML();const last=i===c.messages.length-1;paint(d,m,last,i);
    if(m.error)d.insertAdjacentHTML('beforeend',`<div class="notice"><div><b>Couldn't reach the model.</b> ${esc(m.error)}. Is llama-server running at ${esc(cfg.url)}?</div><button data-retry>Retry</button></div>`);
    else if(!(busy&&last)&&m.content)d.insertAdjacentHTML('beforeend',`<div class="acts"><button class="ib" data-cp aria-label="Copy">${I.copy}</button>${last?`<button class="ib" data-retry aria-label="Regenerate">${I.redo}</button>`:''}</div>`)}
@@ -583,7 +593,71 @@ function fresh(){const c={id:'c'+Date.now(),title:'',messages:[]};chats.unshift(
 /* ---------- model loop ---------- */
 function reqParams(){const p=cfg.p||{},o={};for(const[k,v]of Object.entries(p)){if(v===''||v==null)continue;if(k==='stop'){const s=String(v).split('\n').map(x=>x.trim()).filter(Boolean);if(s.length)o.stop=s}else if(k==='samplers'){const s=String(v).split(/[;,\s]+/).filter(Boolean);if(s.length)o.samplers=s}else if(k==='logit_bias'){try{o.logit_bias=J.parse(v)}catch{}}else o[k]=v}
  if(cfg.xj){try{Object.assign(o,J.parse(cfg.xj))}catch{}}return o}
-let _sysMem=null;function apiMsgs(c){const out=[{role:'system',content:_sysMem||sysFull()}];for(const m of c.messages){if(m.role==='user')out.push({role:'user',content:m.content});else if(m.calls&&m.calls.length){out.push({role:'assistant',content:m.content||'',tool_calls:m.calls.map(k=>({id:k.id,type:'function',function:{name:k.name,arguments:J.stringify(k.args||{})}}))});m.calls.forEach(k=>out.push({role:'tool',tool_call_id:k.id,content:k.res||'(no result)'}))}else if(m.content)out.push({role:'assistant',content:m.content})}return out}
+function condenseTool(k) {
+  if (k.state === "err") return "[Error: " + String(k.res || "failed").slice(0, 100) + "]";
+  if (k.state === "denied" || k.state === "skip") return "[Declined/Skipped]";
+  const a = k.args || {};
+  if (k.name === "list_dir") return "[Listed " + (a.path || ".") + ": " + (k.data?.total || "items") + " found]";
+  if (k.name === "find_files") return "[Found " + (k.data?.total || 0) + " matches for \"" + (a.query || "") + "\"]";
+  if (k.name === "read_file") return "[Read " + (a.path || "file") + " (" + String(k.res || "").length + " chars)]";
+  if (k.name === "write_file") return "[Wrote " + (a.path || "file") + ": OK]";
+  if (k.name === "edit_file") return "[Edited " + (a.path || "file") + ": OK]";
+  if (k.name === "move" || k.name === "copy") return "[" + k.name + " OK]";
+  if (k.name === "delete") return "[Deleted: OK]";
+  if (k.name === "save_fact") return "[Saved fact: OK]";
+  if (k.name === "compile_app") return "[Compiled APK: " + (k.data?.ok ? "OK" : "FAIL") + "]";
+  if (k.name === "web_search") return "[Web search: " + (k.data?.results?.length || 0) + " results used]";
+  if (k.name === "get_vitals") return "[Vitals: " + (k.data?.battery_pct || "?") + "% battery]";
+  if (k.name.startsWith("gh_")) return "[GitHub " + k.name + ": OK]";
+  return String(k.res || "(done)").slice(0, 120);
+}
+
+let _sysMem = null;
+function apiMsgs(c) {
+  const out = [{ role: "system", content: _sysMem || sysFull() }];
+  let lastAsst = null, lastUser = null;
+  for (let i = c.messages.length - 1; i >= 0; i--) {
+    if (!lastAsst && c.messages[i].role === "assistant") lastAsst = c.messages[i];
+    if (!lastUser && c.messages[i].role === "user") lastUser = c.messages[i];
+    if (lastAsst && lastUser) break;
+  }
+  for (const m of c.messages) {
+    if (m.role === "user") {
+      if (cfg.vision && m.image) {
+        if (m === lastUser) {
+          out.push({
+            role: "user",
+            content: [
+              { type: "text", text: m.content || "(image)" },
+              { type: "image_url", image_url: { url: m.image } }
+            ]
+          });
+        } else {
+          out.push({
+            role: "user",
+            content: (m.content ? m.content + "\n" : "") + "[Attached image: previously analyzed]"
+          });
+        }
+      } else {
+        out.push({ role: "user", content: m.content });
+      }
+    } else if (m.calls && m.calls.length) {
+      out.push({
+        role: "assistant",
+        content: m.content || "",
+        tool_calls: m.calls.map(k => ({ id: k.id, type: "function", function: { name: k.name, arguments: JSON.stringify(k.args || {}) } }))
+      });
+      const isCurrentTurn = (m === lastAsst);
+      m.calls.forEach(k => {
+        const payload = isCurrentTurn ? (k.res || "(no result)") : condenseTool(k);
+        out.push({ role: "tool", tool_call_id: k.id, content: payload });
+      });
+    } else if (m.content) {
+      out.push({ role: "assistant", content: m.content });
+    }
+  }
+  return out;
+}
 const safeParse=s=>{try{return J.parse(s||'{}')}catch{return null}};
 async function turn(c,a){ctrl=new AbortController();let raf=0;const acc=[],idx=c.messages.indexOf(a),el=$('#th').children[idx];
  const live=()=>{raf=0;if(el){paint(el,a,true,idx);sc()}};
@@ -826,7 +900,36 @@ async function run(c){setBusy(true);stopped=false;let steps=0;
    c.messages.push({role:'assistant',content:''});save()}}
  catch(e){const a=c.messages.at(-1);if(a&&a.role==='assistant')a.error=e.message||'Failed'}
  busy=false;ctrl=null;gate.clear();_sysMem=null;const l=c.messages.at(-1);if(l&&l.role==='assistant'&&!l.content&&!l.error&&!(l.calls&&l.calls.length))c.messages.pop();save();setBusy(false);render()}
-function send(t){t=t.trim();if(!t||busy)return;const c=cur()||fresh();c.messages.push({role:'user',content:t,ts:Date.now()},{role:'assistant',content:'',ts:Date.now()});if(!c.title)c.title=t.slice(0,42);$('#in').value='';grow();save();run(c)}
+let pendingImg = null;
+function syncVisionUI() {
+  const b = $('#img-btn'); if (b) b.style.display = cfg.vision ? 'inline-flex' : 'none';
+}
+$('#img-btn')?.addEventListener('click', () => $('#img-file')?.click());
+$('#img-file')?.addEventListener('change', e => {
+  const f = e.target.files?.[0]; if (!f) return;
+  const r = new FileReader();
+  r.onload = ev => {
+    pendingImg = ev.target.result;
+    $('#img-thumb').src = pendingImg;
+    $('#img-preview').style.display = 'block';
+    grow();
+  };
+  r.readAsDataURL(f);
+  e.target.value = '';
+});
+$('#img-rm')?.addEventListener('click', () => {
+  pendingImg = null;
+  $('#img-preview').style.display = 'none';
+  grow();
+});
+
+function send(t){
+  t = t.trim();
+  if ((!t && !pendingImg) || busy) return;
+  const c = cur() || fresh();
+  c.messages.push({ role: 'user', content: t, image: pendingImg, ts: Date.now() }, { role: 'assistant', content: '', ts: Date.now() });
+  pendingImg = null;
+  if ($('#img-preview')) $('#img-preview').style.display = 'none';if(!c.title)c.title=t.slice(0,42);$('#in').value='';grow();save();run(c)}
 function grow(){const e=$('#in');e.style.height='auto';e.style.height=Math.min(e.scrollHeight,168)+'px';$('#go').disabled=!busy&&!e.value.trim()}
 window.syncBack = function() {
   const active = !!(
@@ -919,7 +1022,7 @@ function paneGen(){return`<div class="pane" data-p="gen"><div class="fi"><label>
  <div class="sl"><div class="sl-h"><span>Temperature</span><b data-o="t"></b></div><input type="range" data-k="t" data-t="num" min="0" max="1.5" step=".05"></div>
  <div class="sl"><div class="sl-h"><span>Max tokens</span><b data-o="m"></b></div><input type="range" data-k="m" data-t="num" min="128" max="4096" step="128"></div>
  <div class="fi"><label>System prompt</label><textarea class="in" rows="3" data-k="sys" data-t="str"></textarea></div>
- ${sw('thoughts','Show model thoughts','When the model sends reasoning')}${sw('power','Power user','Unlocks a tab with every parameter')}</div>`}
+ ${sw('thoughts','Show model thoughts','When the model sends reasoning')}${sw('vision','Vision (Multimodal)','Enable image attachment for vision models (Gemma 3, Qwen-VL)')}${sw('power','Power user','Unlocks a tab with every parameter')}</div>`}
 function paneTools(){return`<div class="pane" data-p="tool"><div class="sec">Phone files</div>
  ${sw('files','File tools','List, find, read, write, edit, move, copy and delete')}
  <div class="set"><div class="lt"><span id="fs-t">Files access</span><small id="fs-s"></small></div><button class="btn sm" id="fs-g">Grant</button></div>
@@ -1019,7 +1122,7 @@ if(!$('#fs-t'))return;ninfo();const ok=NI&&NI.files;$('#fs-t').textContent=!NI?'
 }
 function sheet(o){
   setTimeout(syncBack, 10);$('#ss').classList.toggle('open',o);if(o){drawer(false);ninfo();buildSettings()}}
-function done(){saveCfg();sheet(false);ping()}
+function done(){saveCfg();sheet(false);ping();syncVisionUI();}
 $('#s-body').addEventListener('input',e=>{const el=e.target.closest('[data-k]');if(!el)return;const t=el.dataset.t,key=el.dataset.k;let v=el.value;
  if(t==='num'||t==='int'||t==='sel'){v=v===''?undefined:+v;if(Number.isNaN(v))v=undefined}else if(t==='tf')v=v===''?undefined:v==='true';else if(v===''&&/^(p|srv)\./.test(key))v=undefined;
  if(key==='search.max'&&v!==undefined)v=Math.max(1,Math.min(10,v));setPath(cfg,key,v);if(key==='t'||key==='m')lab();saveCfg()});
@@ -1167,7 +1270,7 @@ $('#th').onclick=e=>{const t=e.target;if(t.closest('.chip'))return send(t.textCo
 $('#st').onclick=()=>sheet(true);$('#ss').onclick=e=>{if(e.target.id==='ss')done()};$('#s-x').onclick=$('#s-ok').onclick=done;
 document.addEventListener('visibilitychange',()=>{if(!document.hidden){ninfo();filesUI()}});
 matchMedia('(prefers-color-scheme:light)').addEventListener('change',theme);
-theme();setBusy(false);render();ping();
+theme();setBusy(false);render();ping();syncVisionUI();
 
 /* =========================================================
    MONACO CODE EDITOR (offline, native bridge, local model)
