@@ -26,7 +26,7 @@ class MemoryTools(private val dbFile: File, private val workspace: () -> File) {
         private set
 
     init {
-        db.execSQL("PRAGMA journal_mode=WAL")
+        db.enableWriteAheadLogging()
         db.execSQL(
             """CREATE TABLE IF NOT EXISTS facts (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
