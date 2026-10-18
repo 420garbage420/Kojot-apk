@@ -396,7 +396,7 @@ textarea.in{height:auto;min-height:64px;padding:9px 12px;font:13px/19px var(--mo
 </div></div>
 <script>
 const $=s=>document.querySelector(s),LS=localStorage,J=JSON;
-const DEF={url:'http://127.0.0.1:8080',sys:'You are a helpful, concise assistant.',t:.7,m:1024,theme:'auto',power:false,thoughts:true,files:true,ask:true,search:{on:true,prov:'tavily',keys:{},max:5,depth:'basic',sx:'',cu:'',cm:'GET',ch:'',cb:''},p:{},srv:{},xj:''};
+const DEF={url:'http://127.0.0.1:8080',sys:'You are a helpful, concise assistant.',t:.7,m:1024,theme:'auto',power:false,thoughts:true,files:true,ask:true,github:{token:'',repo:'420garbage420/kojot'},search:{on:true,prov:'tavily',keys:{},max:5,depth:'basic',sx:'',cu:'',cm:'GET',ch:'',cb:''},p:{},srv:{},xj:''};
 const saved=(()=>{try{return J.parse(LS.getItem('lc.cfg')||'{}')}catch{return{}}})();
 const cfg={...DEF,...saved,search:{...DEF.search,...saved.search,keys:{...(saved.search||{}).keys}},p:{...saved.p},srv:{...saved.srv}};
 let chats=(()=>{try{return J.parse(LS.getItem('lc.chats')||'[]')}catch{return[]}})(),cid=LS.getItem('lc.cur')||null,busy=false,ctrl=null,stopped=false,NI;
@@ -448,7 +448,7 @@ const FT=[
  fn('compile_app','Compile the current workspace project or web app into an installable Android .apk file.',{project_dir:S('Path to project root containing AndroidManifest.xml or index.html'),app_name:S('Optional app label'),package_id:S('Optional package id e.g. com.example.app')},['project_dir']),
  fn('compiler_status','Check whether on-device aapt2/android.jar/shell dex are ready.',{},[])];
 const WT=fn('web_search','Search the web for current information.',{query:S('Search query'),max_results:Nn('1-10')},['query']);
-const ASK=new Set(['move','copy','delete','write_file','edit_file','compile_app']);
+const ASK=new Set(['gh_commit','gh_create_pr','move','copy','delete','write_file','edit_file','compile_app']);
 const searchReady=()=>{const p=PROV[cfg.search.prov];return p&&(p.need==='key'?!!cfg.search.keys[cfg.search.prov]:p.need==='sx'?!!cfg.search.sx:p.need==='cu'?!!cfg.search.cu:true)};
 function tools(){const t=[];if(cfg.files&&NI)t.push(...FT);if(cfg.search.on&&searchReady())t.push(WT);return t}
 function sysFullBase(){let s=cfg.sys;if(tools().length){s+=`\n\nToday is ${new Date().toDateString()}. You can call tools.${cfg.files&&NI?` File paths are relative to the workspace root (${NI.root}).`:''} Look before you act: list or search to find real paths, never guess them. Use recall_files for semantic discovery. Use save_fact for durable preferences/conventions (telegraphic, under 20 words). Do destructive changes only when asked. Keep arguments short. When done, say briefly what you did, and never claim something a tool did not confirm.`}return s}
@@ -567,7 +567,113 @@ async function turn(c,a){ctrl=new AbortController();let raf=0;const acc=[],idx=c
  if(raf)cancelAnimationFrame(raf);ctrl=null;
  if(a.calls){a.calls=a.calls.filter(k=>k.name).map(k=>{const o=acc.find(x=>x&&x.id===k.id),p=o?safeParse(o.args):{};return p?{id:k.id,name:k.name,args:p,state:'queued'}:{id:k.id,name:k.name,args:{},state:'err',res:'Error: the arguments were not valid JSON.'}});if(!a.calls.length)delete a.calls}}
 function approve(id,ok){const g=gate.get(id);if(g)g.r(ok)}
-async function runTool(k){if(k.name==='web_search')return webSearch(k.args.query,k.args.max_results);return J.parse(await nat(k.name,k.args))}
+
+/* ---------- GitHub REST Suite ---------- */
+const GHT = [
+  fn("gh_get_issue","Fetch an issue or bug report from GitHub to see what needs fixing.",{issue_number:Nn("Issue number"),repo:S("owner/repo e.g. 420garbage420/kojot (optional)")},["issue_number"]),
+  fn("gh_read_file","Read a file directly from a GitHub repository.",{path:S("File path in repo"),repo:S("owner/repo (optional)"),ref:S("Branch or commit (default main)")},["path"]),
+  fn("gh_commit","Commit a changed file to a feature branch. Automatically creates the branch if it does not exist.",{path:S("File path"),content:S("Full updated file content"),message:S("Commit message"),branch:S("Feature branch name e.g. kojot/fix-bug"),repo:S("owner/repo (optional)")},["path","content","message","branch"]),
+  fn("gh_create_pr","Open a Pull Request on GitHub for human review.",{title:S("PR title"),head_branch:S("The feature branch with changes"),body:S("Summary of changes"),base_branch:S("Base branch to merge into (default main)"),repo:S("owner/repo (optional)")},["title","head_branch"])
+];
+
+function b64Dec(str){try{return decodeURIComponent(escape(atob(str.replace(/\s/g,""))))}catch(_){return atob(str.replace(/\s/g,""))}}
+function b64Enc(str){try{return btoa(unescape(encodeURIComponent(str)))}catch(_){return btoa(str)}}
+
+async function ghReq(url, method="GET", body=null){
+  const token = (cfg.github?.token || "").trim();
+  if(!token) throw Error("GitHub Token missing! Add it in Settings -> Tools -> GitHub.");
+  const req = {
+    url: url.startsWith("http") ? url : "https://api.github.com" + url,
+    method,
+    headers: {
+      "Authorization": "Bearer " + token,
+      "Accept": "application/vnd.github+json",
+      "User-Agent": "Kojot-Mobile-Agent"
+    }
+  };
+  if(body){
+    req.headers["Content-Type"] = "application/json";
+    req.body = typeof body === "string" ? body : JSON.stringify(body);
+  }
+  const r = await httpx(req);
+  if(r.status >= 400){
+    let msg = r.body;
+    try{ msg = JSON.parse(r.body).message || r.body; }catch(_){}
+    throw Error(`GitHub API error (${r.status}): ${msg}`);
+  }
+  try{ return JSON.parse(r.body); }catch(_){ return r.body; }
+}
+
+async function ghTool(name, a){
+  const defaultRepo = (cfg.github?.repo || "420garbage420/kojot").trim();
+  const repo = (a.repo || defaultRepo).trim();
+
+  if(name === "gh_get_issue"){
+    const d = await ghReq(`/repos/${repo}/issues/${a.issue_number}`);
+    return { text: `Issue #${a.issue_number}: ${d.title}\n\n${d.body || "(No description)"}`, data: { title: d.title, url: d.html_url } };
+  }
+
+  if(name === "gh_read_file"){
+    const ref = a.ref || "main";
+    const d = await ghReq(`/repos/${repo}/contents/${a.path}?ref=${ref}`);
+    const code = b64Dec(d.content);
+    return { text: code, data: { sha: d.sha, path: d.path, size: d.size } };
+  }
+
+  if(name === "gh_commit"){
+    const branch = a.branch.replace(/^refs\/heads\//, "");
+    let baseSha = null;
+    try {
+      const bInfo = await ghReq(`/repos/${repo}/git/ref/heads/${branch}`);
+      baseSha = bInfo.object.sha;
+    } catch(e) {
+      const rInfo = await ghReq(`/repos/${repo}`);
+      const defBranch = rInfo.default_branch || "main";
+      const defInfo = await ghReq(`/repos/${repo}/git/ref/heads/${defBranch}`);
+      baseSha = defInfo.object.sha;
+      await ghReq(`/repos/${repo}/git/refs`, "POST", { ref: "refs/heads/" + branch, sha: baseSha });
+    }
+
+    let fileSha = undefined;
+    try {
+      const existing = await ghReq(`/repos/${repo}/contents/${a.path}?ref=${branch}`);
+      fileSha = existing.sha;
+    } catch(_) {}
+
+    const payload = {
+      message: a.message,
+      content: b64Enc(a.content),
+      branch: branch
+    };
+    if(fileSha) payload.sha = fileSha;
+
+    const res = await ghReq(`/repos/${repo}/contents/${a.path}`, "PUT", payload);
+    return {
+      text: `Committed ${a.path} to branch ${branch}!\nCommit: ${res.commit?.html_url || "ok"}`,
+      data: { branch, commit_url: res.commit?.html_url }
+    };
+  }
+
+  if(name === "gh_create_pr"){
+    const rInfo = await ghReq(`/repos/${repo}`);
+    const defBranch = a.base_branch || rInfo.default_branch || "main";
+    const res = await ghReq(`/repos/${repo}/pulls`, "POST", {
+      title: a.title,
+      body: a.body || "Automated PR from Kojot on-device agent.",
+      head: a.head_branch,
+      base: defBranch
+    });
+    return {
+      text: `Created PR #${res.number}: ${res.title}\nURL: ${res.html_url}`,
+      data: { pr: res.number, url: res.html_url }
+    };
+  }
+
+  throw Error("Unknown gh op: " + name);
+}
+
+async function runTool(k){if(k.name==='web_search')return webSearch(k.args.query,k.args.max_results);
+ if(k.name.startsWith('gh_'))return ghTool(k.name,k.args);return J.parse(await nat(k.name,k.args))}
 async function execCalls(a){const L=a.calls;
  for(const k of L){if(k.state==='err')continue;k.state=cfg.ask&&ASK.has(k.name)?'ask':'queued';if(k.state==='ask'){let r;const p=new Promise(x=>r=x);gate.set(k.id,{p,r})}}
  refresh(a);
@@ -670,6 +776,13 @@ function paneTools(){return`<div class="pane" data-p="tool"><div class="sec">Pho
   <button class="btn sm" id="cmp-build">Build APK from workspace</button>
  </div>
  <div class="tst" id="cmp-m" style="max-height:160px;overflow:auto;white-space:pre-wrap;font-family:var(--mono);font-size:11px"></div>
+ 
+ <div class="sec">GitHub Integration</div>
+ <div class="fi"><label>Personal Access Token (classic with repo scope)</label><input class="in" type="password" data-k="github.token" data-t="str" placeholder="ghp_..."></div>
+ <div class="fi"><label>Default Repository (owner/repo)</label><input class="in" data-k="github.repo" data-t="str" placeholder="420garbage420/kojot"></div>
+ <div class="r2" style="margin-top:6px"><button class="btn sm" id="gh-test">Test Connection</button></div>
+ <div class="tst" id="gh-m"></div>
+
  <div class="sec">Web search</div>${sw('search.on','Enable web search','Lets the model look things up')}
  <div class="set"><div class="seg" data-seg="search.prov">${Object.entries(PROV).map(([k,v])=>`<button data-v="${k}">${v.n}</button>`).join('')}</div></div>
  ${['tavily','brave','serper'].map(p=>`<div class="fi" data-prov="${p}"><label>${PROV[p].n} API key</label><input class="in" type="password" data-k="search.keys.${p}" data-t="str" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="${p==='tavily'?'tvly-…':'key'}"></div>`).join('')}
