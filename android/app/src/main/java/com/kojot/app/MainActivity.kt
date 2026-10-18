@@ -7,6 +7,7 @@ import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.os.Environment
+import android.os.PowerManager
 import android.provider.Settings
 import android.util.Log
 import android.view.Gravity
@@ -31,14 +32,15 @@ class MainActivity : Activity() {
     private lateinit var web: WebView
     private val model get() = File(filesDir, "model.gguf")
     private val embModel get() = File(filesDir, "nomic.gguf")
+    private val coderModel get() = File(filesDir, "coder.gguf")
     private val prefs by lazy { getSharedPreferences("lc", Context.MODE_PRIVATE) }
     private var memory: MemoryTools? = null
 
-    private var wakeLock: android.os.PowerManager.WakeLock? = null
+    private var wakeLock: PowerManager.WakeLock? = null
     private fun acquireWakeLock() {
         try {
-            val pm = getSystemService(Context.POWER_SERVICE) as android.os.PowerManager
-            wakeLock = pm.newWakeLock(android.os.PowerManager.PARTIAL_WAKE_LOCK, "kojot:indexer")
+            val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
+            wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "kojot:indexer")
             wakeLock?.acquire(30 * 60 * 1000L)
         } catch (_: Exception) {}
     }
@@ -47,6 +49,7 @@ class MainActivity : Activity() {
     }
 
     @Volatile private var backActive = false
+    @Volatile private var activeSlot: String = "chat"
 
     @Deprecated("Deprecated in Java")
     override fun onBackPressed() {
@@ -57,7 +60,6 @@ class MainActivity : Activity() {
         }
     }
 
-    /** Open the memory DB lazily and report the real error if it fails. */
     @Synchronized private fun mem(): MemoryTools {
         memory?.let { return it }
         try {
@@ -108,7 +110,7 @@ class MainActivity : Activity() {
 
     private fun pickModel() {
         tap = { pickModel() }
-        msg.text = "Tap to choose your model (.gguf file).\nAny GGUF model works — it's loaded locally.\nCopied into the app once (needs free space equal to the file size)."
+        msg.text = "Tap to choose your model (.gguf file).\nAny GGUF model works — it's loaded locally."
         startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
             addCategory(Intent.CATEGORY_OPENABLE); type = "*/*"
         }, REQ_MODEL)
@@ -118,6 +120,12 @@ class MainActivity : Activity() {
         startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
             addCategory(Intent.CATEGORY_OPENABLE); type = "*/*"
         }, REQ_EMB)
+    }
+
+    private fun pickCoder() {
+        startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE); type = "*/*"
+        }, REQ_CODER)
     }
 
     @Deprecated("plain Activity keeps this dependency-free")
@@ -130,9 +138,14 @@ class MainActivity : Activity() {
         val dest = when (r) {
             REQ_MODEL -> model
             REQ_EMB -> embModel
+            REQ_CODER -> coderModel
             else -> return
         }
-        val label = if (r == REQ_EMB) "embedding model" else "model"
+        val label = when (r) {
+            REQ_EMB -> "embedding model"
+            REQ_CODER -> "coder model"
+            else -> "model"
+        }
         thread {
             try {
                 val tmp = File(filesDir, "$label.part")
@@ -153,9 +166,12 @@ class MainActivity : Activity() {
                 tmp.renameTo(dest)
                 runOnUiThread {
                     if (r == REQ_MODEL) start()
-                    else {
+                    else if (r == REQ_EMB) {
                         thread { startEmbedding(File(applicationInfo.nativeLibraryDir, "libllama_server.so")) }
-                        msg.text = if (web.visibility == View.VISIBLE) msg.text else "Embedding model installed. Restarting embed server…"
+                        msg.text = if (web.visibility == View.VISIBLE) msg.text else "Embedding model installed."
+                    } else if (r == REQ_CODER) {
+                        if (activeSlot == "coder") restartServer()
+                        msg.text = if (web.visibility == View.VISIBLE) msg.text else "Coder model installed."
                     }
                 }
             } catch (e: Exception) {
@@ -164,9 +180,15 @@ class MainActivity : Activity() {
         }
     }
 
+    private fun activeModelFile(): File {
+        return if (activeSlot == "coder" && coderModel.exists()) coderModel else model
+    }
+
     private fun serverArgs(exe: String, www: String): List<String> {
-        val s = try { JSONObject(prefs.getString("srv", "{}") ?: "{}") } catch (_: Exception) { JSONObject() }
-        val a = mutableListOf(exe, "-m", model.path, "--host", "127.0.0.1", "--port", "8080", "--path", www, "--jinja")
+        val srvKey = if (activeSlot == "coder") "srv_coder" else "srv"
+        val s = try { JSONObject(prefs.getString(srvKey, "{}") ?: "{}") } catch (_: Exception) { JSONObject() }
+        val currentModel = activeModelFile()
+        val a = mutableListOf(exe, "-m", currentModel.path, "--host", "127.0.0.1", "--port", "8080", "--path", www, "--jinja")
         fun num(key: String, flag: String, def: Int) {
             val v = if (s.has(key)) s.optInt(key, 0) else def
             if (v > 0) { a.add(flag); a.add(v.toString()) }
@@ -175,7 +197,8 @@ class MainActivity : Activity() {
             val v = s.optString(key, "").trim()
             if (Regex("[a-z0-9_]{1,12}").matches(v)) { a.add(flag); a.add(v) }
         }
-        num("ctx", "-c", 8192); num("threads", "-t", 4); num("threads_batch", "-tb", 0)
+        val defaultCtx = if (activeSlot == "coder") 32768 else 8192
+        num("ctx", "-c", defaultCtx); num("threads", "-t", 4); num("threads_batch", "-tb", 0)
         num("batch", "-b", 0); num("ubatch", "-ub", 0); num("parallel", "-np", 1)
         word("fa", "-fa"); word("ctk", "-ctk"); word("ctv", "-ctv")
         if (s.optBoolean("mlock", false)) a.add("--mlock")
@@ -185,7 +208,8 @@ class MainActivity : Activity() {
     }
 
     private fun hasCustomArgs(): Boolean {
-        val s = prefs.getString("srv", "{}") ?: "{}"
+        val srvKey = if (activeSlot == "coder") "srv_coder" else "srv"
+        val s = prefs.getString(srvKey, "{}") ?: "{}"
         return s != "{}" && s.isNotBlank()
     }
 
@@ -195,6 +219,39 @@ class MainActivity : Activity() {
         embReady = false
         web.visibility = View.GONE; msg.visibility = View.VISIBLE
         start(old, oldEmb)
+    }
+
+    private fun swapModel(slot: String): JSONObject {
+        val targetSlot = if (slot == "coder") "coder" else "chat"
+        if (targetSlot == "coder" && !coderModel.exists()) {
+            return JSONObject().put("ok", false).put("error", "Coder model not installed").put("slot", activeSlot)
+        }
+        if (targetSlot == activeSlot && proc?.isAlive == true) {
+            return JSONObject().put("ok", true).put("slot", activeSlot).put("cached", true)
+        }
+        activeSlot = targetSlot
+        proc?.destroy()
+        try { proc?.waitFor() } catch (_: Exception) {}
+        proc = null
+        val www = File(filesDir, "www")
+        val exe = File(applicationInfo.nativeLibraryDir, "libllama_server.so")
+        val p = ProcessBuilder(serverArgs(exe.path, www.path)).redirectErrorStream(true).start()
+        proc = p
+        thread { p.inputStream.bufferedReader().forEachLine { Log.d("llama", it) } }
+        for (i in 0 until 40) {
+            if (!p.isAlive) {
+                return JSONObject().put("ok", false).put("error", "Exited with code ${p.exitValue()}").put("slot", activeSlot)
+            }
+            try {
+                val c = URL("http://127.0.0.1:8080/health").openConnection() as HttpURLConnection
+                c.connectTimeout = 300; c.readTimeout = 300
+                if (c.responseCode == 200) {
+                    return JSONObject().put("ok", true).put("slot", activeSlot).put("model", activeModelFile().name)
+                }
+            } catch (_: Exception) {}
+            Thread.sleep(350)
+        }
+        return JSONObject().put("ok", false).put("error", "Startup timed out").put("slot", activeSlot)
     }
 
     private fun copyAssetDir(assetPath: String, dest: File) {
@@ -214,10 +271,7 @@ class MainActivity : Activity() {
         embProc?.let { it.destroy(); try { it.waitFor() } catch (_: Exception) {} }
         embProc = null
         embReady = false
-        if (!embModel.exists()) {
-            Log.i("llama", "No nomic.gguf — embedding server skipped")
-            return
-        }
+        if (!embModel.exists()) return
         try {
             val args = listOf(
                 exe.path, "-m", embModel.path,
@@ -236,7 +290,6 @@ class MainActivity : Activity() {
                         if (c.responseCode == 200) {
                             embReady = true
                             memory?.checkEmbedding()
-                            Log.i("llama-emb", "embedding server ready")
                             return@thread
                         }
                     } catch (_: Exception) {}
@@ -268,9 +321,9 @@ class MainActivity : Activity() {
             repeat(300) {
                 if (!p.isAlive) {
                     runOnUiThread {
-                        msg.text = "Model server exited (code ${p.exitValue()}). See logcat tag 'llama'." +
+                        msg.text = "Model server exited (code ${p.exitValue()})." +
                             if (hasCustomArgs()) "\n\nTap to reset server settings and retry." else ""
-                        if (hasCustomArgs()) tap = { prefs.edit().remove("srv").apply(); restartServer() }
+                        if (hasCustomArgs()) tap = { prefs.edit().remove("srv").remove("srv_coder").apply(); restartServer() }
                     }
                     return@thread
                 }
@@ -347,19 +400,19 @@ class MainActivity : Activity() {
         val rt = Runtime.getRuntime()
         val heapUsedMb = (rt.totalMemory() - rt.freeMemory()) shr 20
 
-        val pm = getSystemService(Context.POWER_SERVICE) as android.os.PowerManager
-        val thermal = if (android.os.Build.VERSION.SDK_INT >= 29) {
+        val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
+        val thermal = if (Build.VERSION.SDK_INT >= 29) {
             when (pm.currentThermalStatus) {
-                android.os.PowerManager.THERMAL_STATUS_NONE -> "normal"
-                android.os.PowerManager.THERMAL_STATUS_LIGHT -> "light"
-                android.os.PowerManager.THERMAL_STATUS_MODERATE -> "moderate"
-                android.os.PowerManager.THERMAL_STATUS_SEVERE -> "severe"
-                android.os.PowerManager.THERMAL_STATUS_CRITICAL -> "critical"
+                PowerManager.THERMAL_STATUS_NONE -> "normal"
+                PowerManager.THERMAL_STATUS_LIGHT -> "light"
+                PowerManager.THERMAL_STATUS_MODERATE -> "moderate"
+                PowerManager.THERMAL_STATUS_SEVERE -> "severe"
+                PowerManager.THERMAL_STATUS_CRITICAL -> "critical"
                 else -> "unknown"
             }
         } else "legacy"
 
-        val stat = android.os.Environment.getDataDirectory()
+        val stat = Environment.getDataDirectory()
         val freeDiskGb = String.format(java.util.Locale.US, "%.1f", stat.freeSpace / 1073741824.0)
 
         val txt = "Battery: ${batteryPct}% (${if (charging) "charging" else "discharging"}, ${tempC}°C) · RAM: ${availRamMb}/${totalRamMb}MB free (Kojot: ${heapUsedMb}MB) · Thermal: ${thermal} · Storage: ${freeDiskGb}GB free"
@@ -381,6 +434,16 @@ class MainActivity : Activity() {
     private fun dispatch(op: String, a: JSONObject): JSONObject = when (op) {
         "get_vitals" -> getVitals()
         "http" -> http(a)
+        "pick_coder" -> {
+            runOnUiThread { pickCoder() }
+            JSONObject().put("text", "coder picker opened")
+        }
+        "swap_model" -> swapModel(a.optString("slot", "chat"))
+        "set_coder_srv" -> {
+            val s = a.optJSONObject("srv") ?: JSONObject()
+            prefs.edit().putString("srv_coder", s.toString()).apply()
+            JSONObject().put("text", "saved coder srv")
+        }
         "grant" -> {
             runOnUiThread {
                 try {
@@ -467,8 +530,11 @@ class MainActivity : Activity() {
                 .put("root", rootDir().path)
                 .put("base", base())
                 .put("srv", try { JSONObject(prefs.getString("srv", "{}") ?: "{}") } catch (_: Exception) { JSONObject() })
+                .put("srv_coder", try { JSONObject(prefs.getString("srv_coder", "{}") ?: "{}") } catch (_: Exception) { JSONObject() })
                 .put("embed", embReady || (memory?.embOnline == true))
                 .put("embed_model", embPresent)
+                .put("coder_model", coderModel.exists())
+                .put("active_slot", activeSlot)
                 .put("compiler", File(filesDir, "compiler_tools/aapt2").canExecute())
                 .toString()
         }
@@ -493,5 +559,6 @@ class MainActivity : Activity() {
     companion object {
         private const val REQ_MODEL = 1
         private const val REQ_EMB = 2
+        private const val REQ_CODER = 3
     }
 }

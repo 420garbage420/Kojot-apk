@@ -333,7 +333,7 @@ textarea.in{height:auto;min-height:64px;padding:9px 12px;font:13px/19px var(--mo
 <!-- ===== Monaco Code Editor View ===== -->
 <div id="editor-view">
  <div id="ed-header">
-  <div class="file-pill"><span id="ed-dirty"></span><span id="ed-fname">untitled.html</span></div>
+  <div class="file-pill"><span id="ed-dirty"></span><span id="ed-fname">untitled.html</span><span id="ed-engine" style="font-size:10px;font-family:var(--mono);padding:2px 7px;border-radius:12px;background:var(--bg-well);color:var(--cyan);margin-left:8px;border:1px solid var(--line)">Chat Engine</span></div>
   <div style="display:flex;align-items:center;gap:8px"><span id="ed-pos" style="font-family:var(--mono)">Ln 1, Col 1</span>
    <button class="ib" id="ed-back" aria-label="Back to chat"><svg viewBox="0 0 24 24"><path d="M15 6l-6 6 6 6"/></svg></button>
   </div>
@@ -1056,6 +1056,21 @@ function paneTools(){return`<div class="pane" data-p="tool"><div class="sec">Pho
  </div>
  <div class="tst" id="vit-m" style="white-space:pre-wrap;font-family:var(--mono);font-size:12px;margin-top:6px"></div>
 
+ <div class="sec">Coder Engine (Monaco)</div>
+<div class="set"><div class="lt"><span id="coder-st">Specialized Coding Model</span><small id="coder-s">tap to select .gguf</small></div><button class="btn sm" id="coder-pick">Choose .gguf</button></div>
+<div class="fi" style="margin-top:8px">
+ <label>Coder Context Window (-c)</label>
+ <select class="in" id="coder-ctx">
+  <option value="8192">8192</option>
+  <option value="16384">16384</option>
+  <option value="32768" selected>32768 (Recommended for Qwen 3.5)</option>
+  <option value="65536">65536</option>
+ </select>
+ <small style="color:var(--fg-3)">Hybrid linear attention uses only ~400MB RAM at 32k context.</small>
+</div>
+<div class="r2" style="margin-top:6px"><button class="btn sm" id="coder-save">Save Coder Config</button></div>
+<div class="tst" id="coder-m"></div>
+
  <div class="sec">APK compiler</div>
  <div class="set"><div class="lt"><span>On-device build</span><small id="cmp-s">aapt2 · d8 · shell</small></div></div>
  <div class="r2" style="margin-top:6px;flex-wrap:wrap">
@@ -1117,6 +1132,19 @@ if(!$('#fs-t'))return;ninfo();const ok=NI&&NI.files;$('#fs-t').textContent=!NI?'
  }
  $('#roots').innerHTML=b?[['Phone',b],['Downloads',b+'/Download'],['Documents',b+'/Documents'],['Pictures',b+'/Pictures'],['Photos',b+'/DCIM']].map(([n,p])=>`<button data-r="${ea(p)}">${n}</button>`).join(''):'';$('#rt').value=NI?NI.root:'';
  // refresh memory stats + anchor when tools pane is built
+ if($('#coder-s')){
+  ninfo();
+  if (NI && NI.coder_model) {
+    $('#coder-s').textContent = 'Installed · Ready for Monaco';
+    $('#coder-st').style.color = 'var(--cyan)';
+  } else {
+    $('#coder-s').textContent = 'Not installed (tap to choose .gguf)';
+    $('#coder-st').style.color = 'var(--fg)';
+  }
+  const srvC = NI && NI.srv_coder ? NI.srv_coder : {};
+  if ($('#coder-ctx') && srvC.ctx) $('#coder-ctx').value = String(srvC.ctx);
+}
+
  if($('#mem-s')){nat('memory_stats',{}).then(raw=>{try{const r=JSON.parse(raw);$('#mem-s').textContent=r.text;if($('#mem-m'))$('#mem-m').textContent=''}catch(_){}}).catch(()=>{});
   nat('get_user_anchor',{}).then(raw=>{try{const r=JSON.parse(raw);if($('#mem-anchor'))$('#mem-anchor').value=r.text||(r.data&&r.data.anchor)||''}catch(_){}}).catch(()=>{})}
 }
@@ -1205,6 +1233,25 @@ $('#s-body').addEventListener('click',async e=>{const t=e.target;let b;
    filesUI();
    return;
  }
+ if(t.closest('#coder-pick')){
+   try{ await nat('pick_coder', {}); }catch(x){ alert(x.message); }
+   return;
+ }
+ if(t.closest('#coder-save')){
+   const ctx = +$('#coder-ctx').value || 32768;
+   const m = $('#coder-m');
+   m.style.color = 'var(--fg-2)';
+   m.textContent = 'Saving…';
+   try{
+     await nat('set_coder_srv', { srv: { ctx } });
+     m.style.color = 'var(--success)';
+     m.textContent = 'Saved Coder config (ctx: ' + ctx + ').';
+   }catch(x){
+     m.style.color = 'var(--danger)';
+     m.textContent = x.message;
+   }
+   return;
+ }
  if(t.closest('#cmp-status')){const m=$('#cmp-m');m.style.color='var(--fg-2)';m.textContent='Checking…';try{const r=JSON.parse(await nat('compiler_status',{}));m.style.color=r.data&&r.data.ready?'var(--success)':'var(--danger)';m.textContent=r.text;$('#cmp-s').textContent=r.text}catch(x){m.style.color='var(--danger)';m.textContent=x.message}return}
  if(t.closest('#cmp-build')){const m=$('#cmp-m');if(!confirm('Compile the workspace root into an APK? This may take a minute.'))return;m.style.color='var(--fg-2)';m.textContent='Building…';try{const r=JSON.parse(await nat('compile_app',{project_dir:'.'}));const ok=r.data&&r.data.ok;m.style.color=ok?'var(--success)':'var(--danger)';
    let log='';if(r.data&&r.data.logs){log='\n'+r.data.logs.map(l=>'['+l.step+'] '+l.text).join('\n')}
@@ -1284,6 +1331,26 @@ function edLang(name){const e=(name.split('.').pop()||'').toLowerCase();return({
 function setEdDirty(s){edDirty=s;$('#ed-dirty').classList.toggle('on',!!s)}
 function showEditor(on){
   setTimeout(syncBack, 10);
+  const eng = $('#ed-engine');
+  if (on) {
+    ninfo();
+    if (NI && NI.coder_model) {
+      if (eng) { eng.textContent = 'Swapping to Coder…'; eng.style.color = 'var(--gold)'; }
+      nat('swap_model', { slot: 'coder' }).then(raw => {
+        try {
+          const r = JSON.parse(raw);
+          if (r.ok && eng) { eng.textContent = 'Qwen Coder (32k)'; eng.style.color = 'var(--cyan)'; }
+        } catch(_) {}
+      }).catch(() => { if (eng) { eng.textContent = 'Main Engine'; eng.style.color = 'var(--fg-3)'; } });
+    } else if (eng) {
+      eng.textContent = 'Main Engine'; eng.style.color = 'var(--fg-3)';
+    }
+  } else {
+    ninfo();
+    if (NI && NI.coder_model && NI.active_slot === 'coder') {
+      nat('swap_model', { slot: 'chat' }).catch(() => {});
+    }
+  }
   $('#editor-view').classList.toggle('on',on);
   document.querySelector('.main')?.classList.toggle('hidden-for-ed',on);
   document.querySelectorAll('.ed-nav').forEach(b=>b.classList.toggle('on',on));
