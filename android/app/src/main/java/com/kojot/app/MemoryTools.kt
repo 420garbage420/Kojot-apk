@@ -136,12 +136,24 @@ class MemoryTools(private val dbFile: File, private val workspace: () -> File) {
                 for (i in 0 until n) v[i] /= norm
             }
             embOnline = true
+            reconcileDim(n)
             v
         } catch (e: Exception) {
             Log.w("MemoryTools", "embed failed: ${e.message}")
             embOnline = false
             null
         }
+    }
+
+    /** If the embedding model changed (different vector size), old vectors are meaningless: drop them. */
+    private fun reconcileDim(n: Int) {
+        val prev = getMeta("emb_dim")?.toIntOrNull()
+        if (prev == n) return
+        if (prev != null) {
+            db.execSQL("UPDATE facts SET vec=NULL")
+            db.execSQL("UPDATE file_index SET vec=NULL, mtime=0")
+        }
+        setMeta("emb_dim", n.toString())
     }
 
     private fun packVec(v: FloatArray): ByteArray {
@@ -159,7 +171,8 @@ class MemoryTools(private val dbFile: File, private val workspace: () -> File) {
     }
 
     private fun cosine(a: FloatArray, b: FloatArray): Float {
-        val n = minOf(a.size, b.size)
+        if (a.size != b.size) return 0f
+        val n = a.size
         if (n == 0) return 0f
         var dot = 0f
         for (i in 0 until n) dot += a[i] * b[i]
