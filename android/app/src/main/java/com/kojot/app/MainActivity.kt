@@ -315,7 +315,59 @@ class MainActivity : Activity() {
     )
     private val compilerOps = setOf("compile_app", "compiler_status")
 
+    
+    private fun getVitals(): JSONObject {
+        val ifilter = android.content.IntentFilter(android.content.Intent.ACTION_BATTERY_CHANGED)
+        val bStatus = registerReceiver(null, ifilter)
+        val level = bStatus?.getIntExtra(android.os.BatteryManager.EXTRA_LEVEL, -1) ?: -1
+        val scale = bStatus?.getIntExtra(android.os.BatteryManager.EXTRA_SCALE, -1) ?: -1
+        val batteryPct = if (level >= 0 && scale > 0) (level * 100 / scale) else -1
+        val tempC = (bStatus?.getIntExtra(android.os.BatteryManager.EXTRA_TEMPERATURE, 0) ?: 0) / 10.0
+        val status = bStatus?.getIntExtra(android.os.BatteryManager.EXTRA_STATUS, -1) ?: -1
+        val charging = status == android.os.BatteryManager.BATTERY_STATUS_CHARGING || status == android.os.BatteryManager.BATTERY_STATUS_FULL
+
+        val am = getSystemService(Context.ACTIVITY_SERVICE) as android.app.ActivityManager
+        val mi = android.app.ActivityManager.MemoryInfo()
+        am.getMemoryInfo(mi)
+        val totalRamMb = mi.totalMem shr 20
+        val availRamMb = mi.availMem shr 20
+
+        val rt = Runtime.getRuntime()
+        val heapUsedMb = (rt.totalMemory() - rt.freeMemory()) shr 20
+
+        val pm = getSystemService(Context.POWER_SERVICE) as android.os.PowerManager
+        val thermal = if (android.os.Build.VERSION.SDK_INT >= 29) {
+            when (pm.currentThermalStatus) {
+                android.os.PowerManager.THERMAL_STATUS_NONE -> "normal"
+                android.os.PowerManager.THERMAL_STATUS_LIGHT -> "light"
+                android.os.PowerManager.THERMAL_STATUS_MODERATE -> "moderate"
+                android.os.PowerManager.THERMAL_STATUS_SEVERE -> "severe"
+                android.os.PowerManager.THERMAL_STATUS_CRITICAL -> "critical"
+                else -> "unknown"
+            }
+        } else "legacy"
+
+        val stat = android.os.Environment.getDataDirectory()
+        val freeDiskGb = String.format(java.util.Locale.US, "%.1f", stat.freeSpace / 1073741824.0)
+
+        val txt = "Battery: ${batteryPct}% (${if (charging) "charging" else "discharging"}, ${tempC}°C) · RAM: ${availRamMb}/${totalRamMb}MB free (Kojot: ${heapUsedMb}MB) · Thermal: ${thermal} · Storage: ${freeDiskGb}GB free"
+
+        return JSONObject()
+            .put("text", txt)
+            .put("data", JSONObject()
+                .put("battery_pct", batteryPct)
+                .put("temp_c", tempC)
+                .put("charging", charging)
+                .put("avail_ram_mb", availRamMb)
+                .put("total_ram_mb", totalRamMb)
+                .put("heap_used_mb", heapUsedMb)
+                .put("thermal", thermal)
+                .put("free_disk_gb", freeDiskGb)
+            )
+    }
+
     private fun dispatch(op: String, a: JSONObject): JSONObject = when (op) {
+        "get_vitals" -> getVitals()
         "http" -> http(a)
         "grant" -> {
             runOnUiThread {
