@@ -19,6 +19,98 @@ import kotlin.math.sqrt
  * - Hybrid recall: FTS5 BM25 + cosine similarity fused via Reciprocal Rank Fusion
  * - Hard cap: recall output ≤ 1600 chars (~400 tokens)
  */
+    data class IndexStatus(
+        var running: Boolean = false,
+        var total: Int = 0,
+        var current: Int = 0,
+        var indexed: Int = 0,
+        var skipped: Int = 0,
+        var currentFile: String = "",
+        var cancelled: Boolean = false,
+        var error: String? = null
+    )
+    val indexStatus = IndexStatus()
+
+    fun getIndexingStatus(): JSONObject = JSONObject()
+        .put("running", indexStatus.running)
+        .put("total", indexStatus.total)
+        .put("current", indexStatus.current)
+        .put("indexed", indexStatus.indexed)
+        .put("skipped", indexStatus.skipped)
+        .put("current_file", indexStatus.currentFile)
+        .put("error", indexStatus.error ?: "")
+
+    fun cancelIndexing(): JSONObject {
+        indexStatus.cancelled = true
+        return JSONObject().put("text", "cancellation requested")
+    }
+
+    fun startIndexing(force: Boolean = false, maxFiles: Int = 10000, onDone: (() -> Unit)? = null): JSONObject {
+        synchronized(indexStatus) {
+            if (indexStatus.running) return JSONObject().put("text", "running").put("data", getIndexingStatus())
+            indexStatus.running = true
+            indexStatus.cancelled = false
+            indexStatus.total = 0
+            indexStatus.current = 0
+            indexStatus.indexed = 0
+            indexStatus.skipped = 0
+            indexStatus.currentFile = ""
+            indexStatus.error = null
+        }
+        if (force) {
+            db.execSQL("DELETE FROM file_index")
+        }
+        val root = workspace()
+        kotlin.concurrent.thread(name = "kojot-batch-indexer") {
+            try {
+                android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_BACKGROUND)
+                val candidates = ArrayList<File>()
+                fun collect(d: File, depth: Int) {
+                    if (indexStatus.cancelled || candidates.size >= maxFiles) return
+                    val kids = d.listFiles() ?: return
+                    for (k in kids) {
+                        if (indexStatus.cancelled || candidates.size >= maxFiles) return
+                        if (k.name.startsWith(".")) continue
+                        if (k.name in setOf("node_modules", "build", ".git", ".gradle", "__pycache__", "venv")) continue
+                        if (k.isDirectory) {
+                            if (depth < 8) collect(k, depth + 1)
+                            continue
+                        }
+                        if (isTextFile(k)) candidates.add(k)
+                    } 
+                }
+                collect(root, 0)
+                indexStatus.total = candidates.size
+                for (f in candidates) {
+                    if (indexStatus.cancelled) break
+                    val path = rel(f, root)
+                    indexStatus.currentFile = f.name
+                    val existingMtime = db.rawQuery(
+                        "SELECT mtime FROM file_index WHERE path=?", arrayOf(path)
+                    ).use { c -> if (c.moveToFirst()) c.getLong(0) else -1L }
+                    if (existingMtime == f.lastModified()) {
+                        indexStatus.skipped++
+                    } else {
+                        try {
+                            indexFile(f, root)
+                            indexStatus.indexed++
+                        } catch (e: Exception) {
+                            Log.w("MemoryTools", "index error on $path: ${e.message}")
+                        }
+                    }
+                    indexStatus.current++
+                    Thread.sleep(15)
+                }
+            } catch (e: Exception) {
+                indexStatus.error = e.message
+            } finally {
+                indexStatus.running = false
+                onDone?.invoke()
+            }
+        }
+        return JSONObject().put("text", "indexing started").put("data", getIndexingStatus())
+    }
+
 class MemoryTools(private val dbFile: File, private val workspace: () -> File) {
     private val db: SQLiteDatabase = SQLiteDatabase.openOrCreateDatabase(dbFile, null)
     private val embUrl = "http://127.0.0.1:8081/v1/embeddings"
@@ -482,6 +574,9 @@ class MemoryTools(private val dbFile: File, private val workspace: () -> File) {
         "recall_memory" -> recallMemory(a)
         "recall_files" -> recallFiles(a)
         "sync_file_index" -> syncFileIndex(a)
+        "start_indexing" -> startIndexing(a.optBoolean("force", false), a.optInt("max", 10000))
+        "get_indexing_status" -> JSONObject().put("text", "status").put("data", getIndexingStatus())
+        "cancel_indexing" -> cancelIndexing()
         "list_facts" -> listFacts(a)
         "clear_facts" -> clearFacts(a)
         "memory_stats" -> stats()

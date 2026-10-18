@@ -24,6 +24,18 @@ import java.net.URL
 import kotlin.concurrent.thread
 
 class MainActivity : Activity() {
+    private var wakeLock: android.os.PowerManager.WakeLock? = null
+    private fun acquireWakeLock() {
+        try {
+            val pm = getSystemService(Context.POWER_SERVICE) as android.os.PowerManager
+            wakeLock = pm.newWakeLock(android.os.PowerManager.PARTIAL_WAKE_LOCK, "kojot:indexer")
+            wakeLock?.acquire(30 * 60 * 1000L)
+        } catch (_: Exception) {}
+    }
+    private fun releaseWakeLock() {
+        try { if (wakeLock?.isHeld == true) wakeLock?.release() } catch (_: Exception) {}
+    }
+
     private var proc: Process? = null
     private var embProc: Process? = null
     private var tap: (() -> Unit)? = null
@@ -395,6 +407,12 @@ class MainActivity : Activity() {
             JSONObject().put("text", "picker opened")
         }
         in memoryOps -> {
+            if (op == "start_indexing") {
+                acquireWakeLock()
+                return mem().startIndexing(a.optBoolean("force", false), a.optInt("max", 10000)) {
+                    releaseWakeLock()
+                }
+            }
             mem().run(op, a)
         }
         in compilerOps -> {

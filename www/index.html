@@ -929,7 +929,8 @@ function paneTools(){return`<div class="pane" data-p="tool"><div class="sec">Pho
  <div class="set"><div class="lt"><span>Edge memory</span><small id="mem-s">facts · files · embed</small></div></div>
  <div class="r2" style="margin-top:6px;flex-wrap:wrap">
   <button class="btn sm" id="mem-stats">Refresh stats</button>
-  <button class="btn sm" id="mem-reindex">Re-index workspace</button>
+  <button class="btn sm" id="mem-start-index">Start Indexing</button>
+  <button class="btn sm dng" id="mem-force-index">Force Re-index</button>
   <button class="btn sm" id="mem-view">View facts</button>
   <button class="btn sm" id="mem-clear">Clear facts</button>
   <button class="btn sm" id="mem-emb">Install embed model</button>
@@ -1029,7 +1030,37 @@ $('#s-body').addEventListener('click',async e=>{const t=e.target;let b;
  if(t.closest('#rt-s'))return setRoot($('#rt').value.trim());
  if(t.closest('#fs-g')){try{await nat('grant')}catch(x){$('#rt-m').textContent=x.message}return}
  if(t.closest('#mem-stats')){const m=$('#mem-m');m.style.color='var(--fg-2)';m.textContent='…';try{const r=JSON.parse(await nat('memory_stats',{}));m.style.color='var(--success)';m.textContent=r.text;$('#mem-s').textContent=r.text;if(r.data){}}catch(x){m.style.color='var(--danger)';m.textContent=x.message}return}
- if(t.closest('#mem-reindex')){const m=$('#mem-m');m.style.color='var(--fg-2)';m.textContent='Indexing…';try{const r=JSON.parse(await nat('sync_file_index',{max:200}));m.style.color='var(--success)';m.textContent=r.text;$('#mem-s').textContent=r.text}catch(x){m.style.color='var(--danger)';m.textContent=x.message}return}
+ if(t.closest('#mem-start-index') || t.closest('#mem-force-index')){
+   const force = !!t.closest('#mem-force-index');
+   if(force && !confirm('Wipe file index and re-embed all files from scratch?')) return;
+   const m=$('#mem-m');
+   m.style.color='var(--fg-2)';
+   m.textContent=force?'Wiping index and starting…':'Starting indexer…';
+   try{
+     await nat('start_indexing', { force });
+     if(window._idxPoll) clearInterval(window._idxPoll);
+     window._idxPoll = setInterval(async()=>{
+       try{
+         const res=JSON.parse(await nat('get_indexing_status',{}));
+         const d=res.data||{};
+         if(!d.running){
+           clearInterval(window._idxPoll);
+           window._idxPoll=null;
+           m.style.color='var(--success)';
+           m.textContent='Completed! Indexed: '+d.indexed+', Skipped: '+d.skipped+' / Total: '+d.total;
+           nat('memory_stats',{}).then(raw=>{try{$('#mem-s').textContent=JSON.parse(raw).text}catch(_){}});
+           return;
+         }
+         m.style.color='var(--cyan)';
+         m.textContent='Indexing: '+d.current+'/'+d.total+' files ('+d.skipped+' skipped) · '+(d.current_file||'…');
+       }catch(_){}
+     }, 750);
+   }catch(err){
+     m.style.color='var(--danger)';
+     m.textContent=err.message||err;
+   }
+   return;
+ }
  if(t.closest('#mem-view')){const m=$('#mem-m');m.style.color='var(--fg-2)';m.textContent='Loading…';try{const r=JSON.parse(await nat('list_facts',{limit:30}));m.style.color='var(--fg-2)';m.textContent=r.text||'(empty)'}catch(x){m.style.color='var(--danger)';m.textContent=x.message}return}
  if(t.closest('#mem-clear')){if(!confirm('Clear all stored facts?'))return;const m=$('#mem-m');try{const r=JSON.parse(await nat('clear_facts',{}));m.style.color='var(--success)';m.textContent=r.text}catch(x){m.style.color='var(--danger)';m.textContent=x.message}return}
  if(t.closest('#mem-emb')){try{await nat('pick_embedding',{});const m=$('#mem-m');m.style.color='var(--fg-2)';m.textContent='Pick nomic-embed-text GGUF…'}catch(x){$('#mem-m').textContent=x.message}return}
