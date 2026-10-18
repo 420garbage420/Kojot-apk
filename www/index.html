@@ -519,7 +519,17 @@ const TT={
  move:{i:'move',v:['Moving','Moved','Move'],o:a=>items(a.src),s:a=>`${arr(a.src).map(base).join(', ')} → ${a.dst||''}`},
  copy:{i:'copy',v:['Copying','Copied','Copy'],o:a=>items(a.src),s:a=>`${arr(a.src).map(base).join(', ')} → ${a.dst||''}`},
  delete:{i:'trash',v:['Deleting','Deleted','Delete'],o:a=>items(a.paths||a.path),s:a=>arr(a.paths||a.path).join(', ')},
- web_search:{i:'globe',v:['Searching','Searched','Search'],o:a=>`the web for "${a.query||'…'}"`,s:(a,k)=>k.data?`${k.data.results.length} results · ${k.data.prov}`:(PROV[cfg.search.prov]||{}).n||''}};
+ web_search:{i:'globe',v:['Searching','Searched','Search'],o:a=>'the web for "'+(a.query||'…')+'"',s:(a,k)=>k.data?k.data.results.length+' results · '+k.data.prov:(PROV[cfg.search.prov]||{}).n||''},
+ write_file:{i:'file',v:['Writing','Wrote','Write'],o:a=>base(a.path||'file'),s:a=>(a.path||'')+' ('+fmt((a.content||'').length)+')'},
+ edit_file:{i:'file',v:['Editing','Edited','Edit'],o:a=>base(a.path||'file'),s:a=>a.path||''},
+ save_fact:{i:'bulb',v:['Remembering','Remembered','Remember'],o:a=>'['+(a.tag||'NOTE')+']',s:a=>a.content||''},
+ recall_files:{i:'find',v:['Recalling','Recalled','Recall'],o:a=>'workspace files for "'+(a.query||'…')+'"',s:(a,k)=>k.data&&k.data.files?k.data.files.length+' match(es)':''},
+ compile_app:{i:'file',v:['Compiling','Compiled','Compile'],o:a=>(a.app_name||'APK')+' from '+(a.project_dir||'.'),s:(a,k)=>k.data&&k.data.apk?base(k.data.apk)+(k.data.signed?' (signed)':' (unsigned)'):''},
+ compiler_status:{i:'file',v:['Checking','Checked','Check'],o:()=>'compiler tools',s:(a,k)=>k.data?(k.data.ready?'tools ready':'tools incomplete'):''},
+ gh_get_issue:{i:'globe',v:['Fetching','Fetched','Fetch'],o:a=>'GitHub issue #'+(a.issue_number||''),s:(a,k)=>k.data?k.data.title||'':''},
+ gh_read_file:{i:'file',v:['Reading','Read','Read'],o:a=>base(a.path||'file')+' from GitHub',s:a=>a.path||''},
+ gh_commit:{i:'globe',v:['Committing','Committed','Commit'],o:a=>base(a.path||'file')+' to '+((a.branch||'').replace('refs/heads/','')),s:a=>a.message||''},
+ gh_create_pr:{i:'globe',v:['Opening','Opened','Open'],o:a=>'PR: "'+(a.title||'changes')+'"',s:(a,k)=>k.data?'PR #'+(k.data.pr||''):''}};
 function title(k){const T=TT[k.name],a=k.args||{},st=k.state;if(!T)return k.name;const o=T.o(a);
  if(st==='ask')return`${T.v[2]} ${o}?`;if(st==='ok')return`${k.name==='delete'&&!a.permanent?'Trashed':T.v[1]} ${o}`;
  if(st==='err')return`Couldn't ${T.v[2].toLowerCase()} ${o}`;if(st==='denied')return`Declined: ${T.v[2].toLowerCase()} ${o}`;if(st==='skip')return`Skipped: ${T.v[2].toLowerCase()} ${o}`;return`${T.v[0]} ${o}…`}
@@ -530,7 +540,13 @@ function bodyHTML(k){const a=k.args||{},d=k.data||{};let h='';
  else if(k.name==='make_dir')h=arr(a.paths||a.path).map(p=>`<div class="ln">${ic('mkdir')}<span>${esc(p)}</span></div>`).join('');
  else if(d.entries){const L=d.entries.slice(0,40);h=`<div class="lst">${L.map(e=>`<div class="ln">${ic(e.d?'folder':'file')}<span>${esc(d.full?e.p:e.n)}${e.d?'/':''}</span>${e.d?'':`<i>${fmt(e.s)}</i>`}</div>`).join('')}</div>`+(d.entries.length>40||d.more?`<div class="note">+ more not shown here</div>`:'')}
  else if(d.results){h=(d.answer?`<div class="ans">${esc(d.answer)}</div>`:'')+d.results.map(r=>{let dm='';try{dm=new URL(r.u).hostname.replace(/^www\./,'')}catch{}return`<a class="sr" href="${ea(r.u)}" target="_blank" rel="noopener"><s>${esc((dm||'?')[0].toUpperCase())}</s><div><b>${esc(r.t||dm)}</b><small>${esc(dm)}</small><p>${esc(r.c||'')}</p></div></a>`}).join('')}
- else if(k.name==='read_file'&&k.res)h=`<pre>${esc(k.res)}</pre>`;
+ else if(k.name==='read_file'&&k.res)h='<pre>'+esc(k.res)+'</pre>';
+ else if(k.name==='write_file')h='<div class="ln">'+ic('file')+'<span>'+esc(a.path||'')+'</span><i>'+fmt((a.content||'').length)+'</i></div>';
+ else if(k.name==='edit_file')h='<div class="ln">'+ic('file')+'<span>'+esc(a.path||'')+'</span></div><pre>Search: '+esc((a.search||'').slice(0,120))+'\nReplace: '+esc((a.replace||'').slice(0,120))+'</pre>';
+ else if(k.name==='save_fact')h='<div class="ans"><b>['+esc(a.tag||'NOTE')+']</b> '+esc(a.content||'')+'</div>';
+ else if(k.name==='compile_app'&&d.apk)h='<div class="ln">'+ic('file')+'<span>'+esc(base(d.apk))+'</span><i>'+(d.signed?'signed':'unsigned')+'</i></div>'+(d.ok?'<div style="margin-top:8px"><button class="btn sm" onclick="nat(\'install_apk\',{path:\''+ea(d.apk)+'\'}).catch(e=>alert(e.message))">Install APK</button></div>':'');
+ else if(k.name==='gh_create_pr'&&d.url)h='<div class="ans"><a href="'+ea(d.url)+'" target="_blank" rel="noopener">Pull Request #'+esc(d.pr||'')+': '+esc(a.title||'')+'</a></div>';
+ else if(k.name==='gh_commit'&&d.commit_url)h='<div class="ans"><a href="'+ea(d.commit_url)+'" target="_blank" rel="noopener">Commit on '+esc(a.branch||'')+'</a></div>';
  if(!h&&k.state!=='err'&&k.state!=='prep')h=`<pre>${esc(J.stringify(a,null,1))}</pre>`;
  if(k.state==='err'||k.state==='denied')h+=`<div class="warn">${esc(k.res||'')}</div>`;
  if(k.state==='ok'&&(k.name==='move'||k.name==='copy'||k.name==='delete')&&k.res&&/failed:/.test(k.res))h+=`<div class="warn">${esc(k.res.split('\n').filter(l=>/failed:/.test(l)).join('\n'))}</div>`;
