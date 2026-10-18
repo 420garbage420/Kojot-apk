@@ -37,27 +37,6 @@ class MemoryTools(private val dbFile: File, private val workspace: () -> File) {
             )"""
         )
         db.execSQL(
-            """CREATE VIRTUAL TABLE IF NOT EXISTS facts_fts
-               USING fts5(tag, content, content='facts', content_rowid='id')"""
-        )
-        // Keep FTS in sync with facts via triggers
-        db.execSQL(
-            """CREATE TRIGGER IF NOT EXISTS facts_ai AFTER INSERT ON facts BEGIN
-                 INSERT INTO facts_fts(rowid, tag, content) VALUES (new.id, new.tag, new.content);
-               END"""
-        )
-        db.execSQL(
-            """CREATE TRIGGER IF NOT EXISTS facts_ad AFTER DELETE ON facts BEGIN
-                 INSERT INTO facts_fts(facts_fts, rowid, tag, content) VALUES('delete', old.id, old.tag, old.content);
-               END"""
-        )
-        db.execSQL(
-            """CREATE TRIGGER IF NOT EXISTS facts_au AFTER UPDATE ON facts BEGIN
-                 INSERT INTO facts_fts(facts_fts, rowid, tag, content) VALUES('delete', old.id, old.tag, old.content);
-                 INSERT INTO facts_fts(rowid, tag, content) VALUES (new.id, new.tag, new.content);
-               END"""
-        )
-        db.execSQL(
             """CREATE TABLE IF NOT EXISTS file_index (
                 path TEXT PRIMARY KEY,
                 mtime INTEGER NOT NULL,
@@ -71,7 +50,6 @@ class MemoryTools(private val dbFile: File, private val workspace: () -> File) {
                 value TEXT
             )"""
         )
-        // Seed a default user anchor if missing
         if (getMeta("user_anchor").isNullOrBlank()) {
             setMeta(
                 "user_anchor",
@@ -79,7 +57,6 @@ class MemoryTools(private val dbFile: File, private val workspace: () -> File) {
             )
         }
     }
-
     private fun result(text: String, data: JSONObject? = null): JSONObject =
         JSONObject().put("text", text).apply { if (data != null) put("data", data) }
 
@@ -218,35 +195,22 @@ class MemoryTools(private val dbFile: File, private val workspace: () -> File) {
 
         val byId = LinkedHashMap<Long, Hit>()
 
-        // --- FTS5 BM25 ---
-        val ftsQuery = query
-            .replace(Regex("[\"']"), " ")
-            .split(Regex("\\s+"))
-            .filter { it.length > 1 }
-            .joinToString(" OR ") { "\"${it.replace("\"", "")}\"" }
-        if (ftsQuery.isNotBlank()) {
+        // --- Keyword matching ---
+        val tokens = query.split(Regex("\\s+")).filter { it.length > 1 }
+        for (t in tokens) {
             try {
                 db.rawQuery(
-                    """SELECT f.id, f.tag, f.content, bm25(facts_fts) AS rank
-                       FROM facts_fts
-                       JOIN facts f ON f.id = facts_fts.rowid
-                       WHERE facts_fts MATCH ?
-                       ORDER BY rank
-                       LIMIT ?""",
-                    arrayOf(ftsQuery, limit.toString())
+                    "SELECT id, tag, content FROM facts WHERE content LIKE ? OR tag LIKE ? LIMIT ?",
+                    arrayOf("%$t%", "%$t%", limit.toString())
                 ).use { c ->
-                    var rank = 1
                     while (c.moveToNext()) {
                         val id = c.getLong(0)
-                        val hit = Hit(id, c.getString(1), c.getString(2), 0.0)
-                        // RRF with k=60
-                        hit.score += 1.0 / (60.0 + rank)
-                        byId[id] = hit
-                        rank++
+                        val hit = byId.getOrPut(id) { Hit(id, c.getString(1), c.getString(2), 0.0) }
+                        hit.score += 1.0 / 61.0
                     }
                 }
             } catch (e: Exception) {
-                Log.w("MemoryTools", "FTS: ${e.message}")
+                Log.w("MemoryTools", "keyword match: ${e.message}")
             }
         }
 
