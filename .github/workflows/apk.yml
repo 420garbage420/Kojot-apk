@@ -47,7 +47,7 @@ jobs:
         run: |
           mkdir -p www/vs
           curl -fsSL "https://registry.npmjs.org/monaco-editor/-/monaco-editor-${{ env.MONACO_VERSION }}.tgz" \
-            | tar -xz --strip-components=2 -C www/vs package/min/vs
+            | tar -xz --strip-components=3 -C www/vs package/min/vs
           # sanity: loader.js must exist
           test -f www/vs/loader.js
 
