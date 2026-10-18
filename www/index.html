@@ -934,6 +934,38 @@ $('#s-body').addEventListener('click',async e=>{const t=e.target;let b;
   }catch(x){m.style.color='var(--danger)';m.textContent=x.message}return}
  if(t.closest('#s-test')){const m=$('#tst');m.style.color='var(--fg-2)';m.textContent='Testing…';const ok=await ping();m.style.color=ok?'var(--success)':'var(--danger)';m.textContent=ok?'Connected to llama-server.':'Could not reach the server.';return}
  if(t.closest('#ctx-restart')){const m=$('#ctx-m');saveCfg();m.style.color='var(--fg-2)';m.textContent='Restarting…';try{await nat('restart',{srv:cfg.srv});m.style.color='var(--success)';m.textContent='Server restarting with ctx '+(cfg.srv.ctx||8192)+'.';done()}catch(x){m.style.color='var(--danger)';m.textContent=x.message}return}
+ if(t.closest("#gh-test")){
+   const m = $("#gh-m");
+   m.style.color = "var(--fg-2)";
+   m.textContent = "Connecting to GitHub...";
+   try {
+     const tokenEl = document.querySelector('[data-k="github.token"]');
+     const repoEl = document.querySelector('[data-k="github.repo"]');
+     const token = (tokenEl ? tokenEl.value : (cfg.github?.token || "")).trim();
+     const repo = (repoEl ? repoEl.value : (cfg.github?.repo || "420garbage420/kojot")).trim();
+
+     if(!token){
+       m.style.color = "var(--danger)";
+       m.textContent = "Paste a Personal Access Token above first.";
+       return;
+     }
+
+     // Immediately sync to active config so tools have it without needing a restart
+     if(!cfg.github) cfg.github = {};
+     cfg.github.token = token;
+     cfg.github.repo = repo;
+     saveCfg();
+
+     // Ping GitHub API
+     const d = await ghReq("/repos/" + repo);
+     m.style.color = "var(--success)";
+     m.textContent = `Connected! ${d.full_name} (${d.default_branch || "main"}) · ⭐ ${d.stargazers_count ?? 0}`;
+   } catch(err) {
+     m.style.color = "var(--danger)";
+     m.textContent = err.message || "Failed to reach GitHub.";
+   }
+   return;
+ }
  if(t.closest('#ws-test')){const m=$('#ws-m');m.style.color='var(--fg-2)';m.textContent='Searching…';try{const r=await webSearch('latest news',3);m.style.color='var(--success)';m.textContent=`Works — ${r.data.results.length} results via ${r.data.prov}.`}catch(x){m.style.color='var(--danger)';m.textContent=x.message}return}
  if(t.closest('#p-info')){const m=$('#srvinfo');m.textContent='Reading…';try{const p=await(await fetch(cfg.url.replace(/\/$/,'')+'/props')).json(),g=p.default_generation_settings||{};m.style.color='var(--fg-2)';m.textContent=`ctx ${g.n_ctx||'?'} · slots ${p.total_slots||'?'} · ${(p.model_path||'').split('/').pop()||'model'} · ${p.build_info||''}`}catch{m.style.color='var(--danger)';m.textContent='Could not read /props.'}return}
  if(t.closest('#p-apply')){saveCfg();try{await nat('restart',{srv:cfg.srv});done()}catch(x){$('#srvinfo').style.color='var(--danger)';$('#srvinfo').textContent=x.message}return}
