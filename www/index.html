@@ -405,7 +405,7 @@ textarea.in{height:auto;min-height:64px;padding:9px 12px;font:13px/19px var(--mo
 </div></div>
 <script>
 const $=s=>document.querySelector(s),LS=localStorage,J=JSON;
-const DEF={url:'http://127.0.0.1:8080',sys:'You are a helpful, concise assistant.',t:.7,m:1024,theme:'auto',power:false,thoughts:true,vision:false,files:true,ask:true,github:{token:'',repo:'420garbage420/kojot'},search:{on:true,prov:'tavily',keys:{},max:5,depth:'basic',sx:'',cu:'',cm:'GET',ch:'',cb:''},p:{},srv:{},xj:''};
+const DEF={url:'http://127.0.0.1:8080',sys:'You are a helpful, concise assistant.',t:.7,m:1024,theme:'auto',power:false,thoughts:true,vision:false,coder_t:0.1,p_coder:{},srv_coder:{},files:true,ask:true,github:{token:'',repo:'420garbage420/kojot'},search:{on:true,prov:'tavily',keys:{},max:5,depth:'basic',sx:'',cu:'',cm:'GET',ch:'',cb:''},p:{},srv:{},xj:''};
 const saved=(()=>{try{return J.parse(LS.getItem('lc.cfg')||'{}')}catch{return{}}})();
 const cfg={...DEF,...saved,search:{...DEF.search,...saved.search,keys:{...(saved.search||{}).keys}},p:{...saved.p},srv:{...saved.srv}};
 let chats=(()=>{try{return J.parse(LS.getItem('lc.chats')||'[]')}catch{return[]}})(),cid=LS.getItem('lc.cur')||null,busy=false,ctrl=null,stopped=false,NI;
@@ -995,7 +995,15 @@ const txt=(k,l,h,ph,r='p')=>`<div class="fi"><label>${l}</label><input class="in
 const area=(k,l,h,ph,r='p',rows=3)=>`<div class="fi"><label>${l}</label><textarea class="in" rows="${rows}" data-k="${r}.${k}" data-t="str" placeholder="${ea(ph)}" spellcheck="false"></textarea><small>${h}</small></div>`;
 const TF=[['','Default'],['true','On'],['false','Off']];
 const grp=(n,h,body,open)=>`<details class="grp"${open?' open':''}><summary>${n}<small>${h}</small>${ic('chev')}</summary><div class="gb">${body}</div></details>`;
-function powerHTML(){return`<div class="pane" data-p="pow"><div class="note" style="margin:2px 0 6px">Empty means “use the server default”. Only fields you fill in are sent with each request.</div>`+
+function powerHTML(){return`<div class="pane" data-p="pow">
+ <div class="set" style="margin-bottom:8px">
+  <div class="lt">Target Configuration<small id="pow-target-lbl">Editing Chat Engine parameters</small></div>
+  <div class="seg" id="pow-target">
+   <button class="on" data-target="chat">Chat</button>
+   <button data-target="coder">Coder</button>
+  </div>
+ </div>
+ <div class="note" style="margin:2px 0 6px">Empty means “use server default”. Only filled fields are sent.</div>`+
  grp('Sampling','which tokens are allowed',num('top_k','Top-K','Only the K likeliest tokens. 0 = off.','40',0,200,1,'int')+num('top_p','Top-P','Nucleus: likeliest tokens adding up to P.','0.95',0,1,.01)+num('min_p','Min-P','Drop tokens below P × the best token.','0.05',0,1,.01)+num('typical_p','Typical-P','Prefer typical-surprise tokens. 1 = off.','1',0,1,.01)+num('top_n_sigma','Top-n-σ','Keep tokens within n σ of the top logit. -1 = off.','-1',-1,10,.1)+num('dynatemp_range','Dynamic temp ±','Temperature floats by this much with confidence. 0 = off.','0',0,5,.1)+num('dynatemp_exponent','Dynamic temp curve','Shape of the dynamic temperature.','1',0,5,.1)+num('seed','Seed','Fixed seed = repeatable replies. -1 = random.','-1',-1,2147483647,1,'int'),true)+
  grp('Repetition','stop loops',num('repeat_penalty','Repeat penalty','>1 discourages repeats. 1 = off.','1.0',0,2,.01)+num('repeat_last_n','Penalty window','Tokens looked back. -1 = whole context, 0 = off.','64',-1,8192,1,'int')+num('presence_penalty','Presence penalty','Flat penalty for any token already used.','0',-2,2,.05)+num('frequency_penalty','Frequency penalty','Penalty grows with each use.','0',-2,2,.05))+
  grp('Mirostat','adaptive sampling',sel('mirostat','Mode','Replaces top-k/top-p when on.',[['','Default'],['0','Off'],['1','v1'],['2','v2']])+num('mirostat_tau','Target surprise (τ)','Lower = more focused.','5',0,10,.1)+num('mirostat_eta','Learning rate (η)','How fast it adapts.','0.1',0,1,.01))+
@@ -1037,6 +1045,7 @@ function paneTools(){return`<div class="pane" data-p="tool"><div class="sec">Pho
   <button class="btn sm" id="mem-view">View facts</button>
   <button class="btn sm" id="mem-clear">Clear facts</button>
   <button class="btn sm" id="mem-emb">Install embed model</button>
+  <button class="btn sm dng" id="mem-emb-del" style="display:none">Remove Embed Model</button>
  </div>
  <div class="tst" id="mem-m"></div>
  <div class="fi" style="margin-top:8px"><label>User anchor <span style="color:var(--fg-3);font-weight:400">(~80 tokens, always injected)</span></label>
@@ -1068,7 +1077,14 @@ function paneTools(){return`<div class="pane" data-p="tool"><div class="sec">Pho
  </select>
  <small style="color:var(--fg-3)">Hybrid linear attention uses only ~400MB RAM at 32k context.</small>
 </div>
-<div class="r2" style="margin-top:6px"><button class="btn sm" id="coder-save">Save Coder Config</button></div>
+ <div class="sl" style="padding:6px 0">
+  <div class="sl-h"><span>Coder Temperature</span><b id="coder-t-lbl">0.10</b></div>
+  <input type="range" id="coder-t" min="0" max="1" step="0.05" value="0.10">
+ </div>
+ <div class="r2" style="margin-top:6px;gap:8px">
+  <button class="btn sm" id="coder-save">Save Config</button>
+  <button class="btn sm dng" id="coder-del" style="display:none">Remove Model</button>
+ </div>
 <div class="tst" id="coder-m"></div>
 
  <div class="sec">APK compiler</div>
@@ -1096,7 +1112,19 @@ function paneTools(){return`<div class="pane" data-p="tool"><div class="sec">Pho
  <div class="set" data-prov="tavily"><div class="lt">Search depth</div><div class="seg" data-seg="search.depth"><button data-v="basic">Basic</button><button data-v="advanced">Advanced</button></div></div>
  ${num('max','Results per search','1 to 10','5',1,10,1,'int','search')}
  <button class="btn sm" id="ws-test">Test search</button><div class="tst" id="ws-m"></div></div>`}
-let curTab='gen';
+let curTab='gen', powTarget='chat';
+function fillPower(){
+  const prefix = powTarget==='coder' ? '_coder' : '';
+  const lbl = $('#pow-target-lbl');
+  if(lbl) lbl.textContent = powTarget==='coder' ? 'Editing Coder Engine parameters (Qwen)' : 'Editing Chat Engine parameters (Gemma)';
+  document.querySelectorAll('#s-body .pane[data-p=pow] [data-k]').forEach(e=>{
+    let k = e.dataset.k;
+    if(k.startsWith('p.')) k = 'p' + prefix + k.slice(1);
+    else if(k.startsWith('srv.')) k = 'srv' + prefix + k.slice(3);
+    const v = getPath(cfg, k);
+    e.value = v == null ? '' : String(v);
+  });
+}
 function tabsHTML(){return[['gen','General'],['tool','Tools'],...(cfg.power?[['pow','Power']]:[])].map(([k,n])=>`<button data-tab="${k}" class="${k===curTab?'on':''}">${n}</button>`).join('')}
 function buildSettings(){$('#s-body').innerHTML=paneGen()+paneTools()+powerHTML();fill();showTab(curTab);$('#s-tabs').innerHTML=tabsHTML()}
 function showTab(t){if(t==='pow'&&!cfg.power)t='gen';curTab=t;document.querySelectorAll('#s-body .pane').forEach(p=>p.classList.toggle('on',p.dataset.p===t));document.querySelectorAll('#s-tabs button').forEach(b=>b.classList.toggle('on',b.dataset.tab===t));$('#s-body').scrollTop=0}
@@ -1135,6 +1163,31 @@ if(!$('#fs-t'))return;ninfo();const ok=NI&&NI.files;$('#fs-t').textContent=!NI?'
  if($('#coder-s')){
   ninfo();
   if (NI && NI.coder_model) {
+    const cName = NI.coder_name || 'Coder Model';
+    $('#coder-st').textContent = cName;
+    $('#coder-st').style.color = 'var(--cyan)';
+    $('#coder-s').textContent = 'Installed · Active in Monaco';
+    if($('#coder-del')) $('#coder-del').style.display = 'inline-block';
+  } else {
+    $('#coder-st').textContent = 'Specialized Coding Model';
+    $('#coder-st').style.color = 'var(--fg)';
+    $('#coder-s').textContent = 'Not installed (tap Choose .gguf)';
+    if($('#coder-del')) $('#coder-del').style.display = 'none';
+  }
+  if ($('#coder-t')) { $('#coder-t').value = String(cfg.coder_t || 0.1); $('#coder-t-lbl').textContent = (+cfg.coder_t || 0.1).toFixed(2); }
+  if (NI && NI.emb_name) {
+    $('#mem-emb').textContent = 'Change Embed Model';
+    if($('#mem-emb-del')) $('#mem-emb-del').style.display = 'inline-block';
+  } else {
+    $('#mem-emb').textContent = 'Install embed model';
+    if($('#mem-emb-del')) $('#mem-emb-del').style.display = 'none';
+  }
+  if (NI && NI.model_name && $('#ttl')) {
+    const cleanM = NI.model_name.replace(/\.gguf$/i, '').slice(0, 24);
+    $('#ttl').textContent = cleanM;
+  }
+  ninfo();
+  if (NI && NI.coder_model) {
     $('#coder-s').textContent = 'Installed · Ready for Monaco';
     $('#coder-st').style.color = 'var(--cyan)';
   } else {
@@ -1153,7 +1206,12 @@ function sheet(o){
 function done(){saveCfg();sheet(false);ping();syncVisionUI();}
 $('#s-body').addEventListener('input',e=>{const el=e.target.closest('[data-k]');if(!el)return;const t=el.dataset.t,key=el.dataset.k;let v=el.value;
  if(t==='num'||t==='int'||t==='sel'){v=v===''?undefined:+v;if(Number.isNaN(v))v=undefined}else if(t==='tf')v=v===''?undefined:v==='true';else if(v===''&&/^(p|srv)\./.test(key))v=undefined;
- if(key==='search.max'&&v!==undefined)v=Math.max(1,Math.min(10,v));setPath(cfg,key,v);if(key==='t'||key==='m')lab();saveCfg()});
+ if(key==='search.max'&&v!==undefined)v=Math.max(1,Math.min(10,v));let effKey = key;
+ if(powTarget==='coder' && el.closest('.pane[data-p=pow]')){
+  if(key.startsWith('p.')) effKey = 'p_coder' + key.slice(1);
+  else if(key.startsWith('srv.')) effKey = 'srv_coder' + key.slice(3);
+ }
+ setPath(cfg,effKey,v);if(key==='t'||key==='m')lab();saveCfg()});
 $('#s-body').addEventListener('click',async e=>{const t=e.target;let b;
  if(b=t.closest('[data-sw]')){const k=b.dataset.sw,v=!getPath(cfg,k);setPath(cfg,k,v);b.setAttribute('aria-checked',v);saveCfg();if(k==='power'){$('#s-tabs').innerHTML=tabsHTML();if(v)$('#s-tabs [data-tab=pow]').classList.add('nw');else if(curTab==='pow')showTab('gen')}return}
  if(b=t.closest('[data-seg] button')){setPath(cfg,b.parentNode.dataset.seg,b.dataset.v);segs();saveCfg();if(b.parentNode.dataset.seg==='theme')theme();provVis();return}
@@ -1237,7 +1295,39 @@ $('#s-body').addEventListener('click',async e=>{const t=e.target;let b;
    try{ await nat('pick_coder', {}); }catch(x){ alert(x.message); }
    return;
  }
+ if(b = t.closest('#pow-target button')){
+   powTarget = b.dataset.target;
+   $('#pow-target').querySelectorAll('button').forEach(btn => btn.classList.toggle('on', btn === b));
+   fillPower();
+   return;
+ }
+ if(t.closest('#coder-del')){
+   if(!confirm('Delete coder model file and reclaim storage?')) return;
+   try{ await nat('delete_coder',{}); ninfo(); filesUI(); alert('Coder model removed.'); }catch(x){ alert(x.message); }
+   return;
+ }
+ if(t.closest('#mem-emb-del')){
+   if(!confirm('Delete embedding model file?')) return;
+   try{ await nat('delete_emb',{}); ninfo(); filesUI(); alert('Embedding model removed.'); }catch(x){ alert(x.message); }
+   return;
+ }
  if(t.closest('#coder-save')){
+   const ctx = +$('#coder-ctx').value || 32768;
+   const tVal = +$('#coder-t').value || 0.1;
+   cfg.coder_t = tVal;
+   saveCfg();
+   const m = $('#coder-m');
+   m.style.color = 'var(--fg-2)'; m.textContent = 'Saving…';
+   try{
+     await nat('set_coder_srv', { srv: { ctx } });
+     m.style.color = 'var(--success)';
+     m.textContent = 'Saved Coder config (ctx: ' + ctx + ', temp: ' + tVal.toFixed(2) + ').';
+   }catch(x){
+     m.style.color = 'var(--danger)'; m.textContent = x.message;
+   }
+   return;
+ }
+ if(false && if(t.closest('#coder-save')){
    const ctx = +$('#coder-ctx').value || 32768;
    const m = $('#coder-m');
    m.style.color = 'var(--fg-2)';
@@ -1339,7 +1429,12 @@ function showEditor(on){
       nat('swap_model', { slot: 'coder' }).then(raw => {
         try {
           const r = JSON.parse(raw);
-          if (r.ok && eng) { eng.textContent = 'Qwen Coder (32k)'; eng.style.color = 'var(--cyan)'; }
+          if (r.ok && eng) {
+  const clean = (NI?.coder_name || 'Coder').replace(/\.gguf$/i, '').slice(0, 16);
+  const cCtx = (NI?.srv_coder?.ctx || 32768) / 1024;
+  eng.textContent = clean + ' (' + cCtx + 'k)';
+  eng.style.color = 'var(--cyan)';
+}
         } catch(_) {}
       }).catch(() => { if (eng) { eng.textContent = 'Main Engine'; eng.style.color = 'var(--fg-3)'; } });
     } else if (eng) {
@@ -1651,3 +1746,13 @@ $('#ed-g-abort')?.addEventListener('click',()=>{
 </script>
 </body>
 </html>
+
+<script>
+document.addEventListener('input', e => {
+  if (e.target.id === 'coder-t') {
+    const v = (+e.target.value).toFixed(2);
+    const lbl = $('#coder-t-lbl'); if (lbl) lbl.textContent = v;
+    cfg.coder_t = +v; saveCfg();
+  }
+});
+</script>

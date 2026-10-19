@@ -135,6 +135,19 @@ class MainActivity : Activity() {
             if (r == REQ_MODEL) msg.text = "No file chosen. Tap to try again."
             return
         }
+        val uri = d?.data ?: return
+        val fileName = try {
+            contentResolver.query(uri, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
+                if (cursor.moveToFirst()) cursor.getString(0) else null
+            }
+        } catch (_: Exception) { null }
+
+        when (r) {
+            REQ_MODEL -> fileName?.let { prefs.edit().putString("model_name", it).apply() }
+            REQ_EMB -> fileName?.let { prefs.edit().putString("emb_name", it).apply() }
+            REQ_CODER -> fileName?.let { prefs.edit().putString("coder_name", it).apply() }
+        }
+
         val dest = when (r) {
             REQ_MODEL -> model
             REQ_EMB -> embModel
@@ -434,6 +447,18 @@ class MainActivity : Activity() {
     private fun dispatch(op: String, a: JSONObject): JSONObject = when (op) {
         "get_vitals" -> getVitals()
         "http" -> http(a)
+        "delete_coder" -> {
+            if (coderModel.exists()) coderModel.delete()
+            prefs.edit().remove("coder_name").remove("srv_coder").apply()
+            if (activeSlot == "coder") swapModel("chat")
+            JSONObject().put("ok", true).put("text", "coder model deleted")
+        }
+        "delete_emb" -> {
+            if (embModel.exists()) embModel.delete()
+            prefs.edit().remove("emb_name").apply()
+            embProc?.destroy(); embProc = null; embReady = false
+            JSONObject().put("ok", true).put("text", "embedding model deleted")
+        }
         "pick_coder" -> {
             runOnUiThread { pickCoder() }
             JSONObject().put("text", "coder picker opened")
