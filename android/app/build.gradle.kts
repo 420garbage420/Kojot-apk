@@ -9,10 +9,14 @@ android {
     }
     signingConfigs {
         getByName("debug") {
-            storeFile = file("debug.keystore")
-            storePassword = "android"
-            keyAlias = "androiddebugkey"
-            keyPassword = "android"
+            // Prefer project debug.keystore when present; otherwise let Gradle use its default
+            val ks = file("debug.keystore")
+            if (ks.exists()) {
+                storeFile = ks
+                storePassword = "android"
+                keyAlias = "androiddebugkey"
+                keyPassword = "android"
+            }
         }
     }
     packaging { jniLibs { useLegacyPackaging = true } }
@@ -20,6 +24,5 @@ android {
     kotlinOptions { jvmTarget = "17" }
 }
 dependencies {
-    // In-process APK v2/v3 signing for the on-device compiler
-    implementation("com.android.tools.build:apksig:8.5.2")
+    // apksig removed — on-device APK compiler archived to compiler-standalone/
 }

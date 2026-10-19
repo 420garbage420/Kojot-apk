@@ -1,7 +1,24 @@
 # Kojot
 
 On-device local agent for Android. Runs any GGUF model via llama-server, with optional
-edge memory (nomic-embed), a Monaco code editor, and an on-device APK compiler.
+edge memory (nomic-embed) and a Monaco code editor.
+
+The on-device APK compiler has been removed from this app and archived under
+`compiler-standalone/` for use in a separate project.
+
+## Agent reliability (AgentDeck-inspired)
+
+The mobile web UI (`www/index.html`) includes guardrails tuned for small on-device models:
+
+1. **Context sanitizer (`scrubJunk`)** — strips nulls, zero-width chars, ANSI codes, and
+   collapses excess blank lines before tool results enter KV cache / `apiMsgs`.
+2. **Continuity governor** — circuit-breaks identical tool calls that fail twice or
+   repeat five times, returning a synthetic mandate instead of spinning.
+3. **Task ledger** — preserves the standing user goal across "continue" / step-limit
+   pauses so the model resumes instead of restarting.
+4. **Myers diff for `edit_file`** — approval cards show a red/green line diff of
+   search vs replace.
+5. **Message actions** — Copy + Download `.md` under completed assistant replies.
 
 ## Package
 
@@ -12,23 +29,10 @@ edge memory (nomic-embed), a Monaco code editor, and an on-device APK compiler.
 ## Build (host)
 
 ```bash
-# Optional: stage aapt2 / android.jar / shell dex for the in-app compiler
-./scripts/build-shell-dex.sh
-
 # CI (GitHub Actions) builds llama-server + packages the APK
 # Or locally:
 cd android && gradle assembleDebug
 ```
-
-## On-device APK compiler
-
-1. Put `aapt2`, `android.jar`, and `shell/classes.dex` under
-   `android/app/src/main/assets/compiler_tools/` (see README there).
-2. In the app: **Settings → Tools → APK compiler → Build APK from workspace**.
-3. Or ask the agent: `compile the current project into an apk`.
-
-Web projects (`index.html`) are wrapped in a minimal WebView shell.
-Android projects need `AndroidManifest.xml` (+ optional `res/`, `assets/`).
 
 ## Models
 

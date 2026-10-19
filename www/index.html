@@ -147,6 +147,11 @@ svg{display:block;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:
 .sr p{margin:2px 0 0;font-size:12px;line-height:17px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
 .ans{margin:0 0 8px;padding:8px 10px;border-radius:12px;background:var(--bg-well);color:var(--fg)}
 .tc pre{margin:0;padding:8px 10px;max-height:180px;overflow:auto;border-radius:12px;background:var(--bg-well);font:12px/17px var(--mono);white-space:pre-wrap;overflow-wrap:anywhere;color:var(--fg)}
+.diffView{font-family:var(--mono);font-size:12px;line-height:1.45;border:1px solid var(--line);border-radius:10px;overflow:auto;max-height:280px;background:var(--bg-well);margin-top:6px}
+.diff-eq{padding:1px 10px;color:var(--fg-3);white-space:pre-wrap}
+.diff-del{padding:1px 10px;background:rgba(255,80,80,.14);color:#ff8a8a;white-space:pre-wrap}
+.diff-add{padding:1px 10px;background:rgba(62,207,142,.14);color:#6eebb0;white-space:pre-wrap}
+.acts .ib[data-dl]{font-size:11px;font-weight:600;width:auto;padding:0 8px;letter-spacing:.02em}
 .warn,.note{margin-top:6px;font-size:12px;line-height:17px}.warn{color:var(--danger)}.note{color:var(--fg-3)}
 /* thoughts */
 .tho{margin-bottom:10px}.tho-b{display:inline-flex;align-items:center;gap:6px;height:30px;padding:0 8px 0 10px;border-radius:999px;font-size:13px;color:var(--fg-2);background:var(--bg-well)}
@@ -419,7 +424,105 @@ chats.forEach(c=>{c.messages.forEach(m=>(m.calls||[]).forEach(k=>{if(!['ok','err
 const shown=new Map(),primed=new Set(),openSet=new Set(),thOpen=new Set(),gate=new Map();
 const IC={folder:'M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2z',file:'M14 3H7a2 2 0 00-2 2v14a2 2 0 002 2h10a2 2 0 002-2V8zM14 3v5h5',find:'M11 4a7 7 0 100 14 7 7 0 000-14zM21 21l-5-5',move:'M4 12h15M13 6l6 6-6 6',copy:'M9 9h11v11H9zM5 15V5a1 1 0 011-1h10',trash:'M4 7h16M10 11v6M14 11v6M6 7l1 12a2 2 0 002 2h6a2 2 0 002-2l1-12M9 7V4h6v3',mkdir:'M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2zM12 11v5M9.5 13.5h5',globe:'M12 3a9 9 0 100 18 9 9 0 000-18zM3 12h18M12 3c3 3 3 15 0 18M12 3c-3 3-3 15 0 18',bulb:'M9 18h6M10 21h4M12 3a6 6 0 00-4 10.5c.7.7 1 1.5 1 2.5h6c0-1 .3-1.8 1-2.5A6 6 0 0012 3z',chev:'M6 9l6 6 6-6',minus:'M6 12h12',err:'M12 8v5M12 16.5v.01M12 3a9 9 0 100 18 9 9 0 000-18z'};
 const ic=n=>`<svg viewBox="0 0 24 24"><path d="${IC[n]}"/></svg>`;
-const I={copy:'<svg viewBox="0 0 24 24"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 012-2h9"/></svg>',redo:'<svg viewBox="0 0 24 24"><path d="M20 11a8 8 0 10-2.3 6M20 4v7h-7"/></svg>',x:'<svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg>',stop:'<svg viewBox="0 0 24 24" style="fill:currentColor;stroke:none"><rect x="6" y="6" width="12" height="12" rx="2.5"/></svg>',up:'<svg viewBox="0 0 24 24"><path d="M12 19V5M5 12l7-7 7 7"/></svg>',chev:ic('chev'),bulb:ic('bulb')};
+const I={copy:'<svg viewBox="0 0 24 24"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 012-2h9"/></svg>',redo:'<svg viewBox="0 0 24 24"><path d="M20 11a8 8 0 10-2.3 6M20 4v7h-7"/></svg>',x:'<svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg>',stop:'<svg viewBox="0 0 24 24" style="fill:currentColor;stroke:none"><rect x="6" y="6" width="12" height="12" rx="2.5"/></svg>',up:'<svg viewBox="0 0 24 24"><path d="M12 19V5M5 12l7-7 7 7"/></svg>',dl:'<svg viewBox="0 0 24 24"><path d="M12 3v12M7 10l5 5 5-5M5 19h14"/></svg>',chev:ic('chev'),bulb:ic('bulb')};
+
+/* strip junk only: zero-width, ANSI, nulls, excess blank lines — never rewrite meaning */
+function scrubJunk(s){
+  return String(s??"")
+    .replace(/\u0000/g,"")
+    .replace(/[\u200B-\u200D\uFEFF]/g,"")
+    .replace(/\x1B\[[0-9;]*[A-Za-z]/g,"")
+    .replace(/\r\n/g,"\n").replace(/\r/g,"\n")
+    .replace(/[ \t]+$/gm,"")
+    .replace(/\n{3,}/g,"\n\n");
+}
+
+/* Myers line diff (zero-dep) for edit_file tool cards */
+function myersDiff(a,b){
+  const A=String(a).split("\n"),B=String(b).split("\n");
+  const N=A.length,M=B.length,max=N+M;
+  const v={1:0},trace=[];
+  for(let d=0;d<=max;d++){
+    const v2={};
+    for(let k=-d;k<=d;k+=2){
+      let x;
+      if(k===-d||(k!==d&&(v[k-1]??-1)<(v[k+1]??-1)))x=v[k+1]??0;
+      else x=(v[k-1]??0)+1;
+      let y=x-k;
+      while(x<N&&y<M&&A[x]===B[y]){x++;y++}
+      v2[k]=x;
+      if(x>=N&&y>=M){
+        trace.push(v2);
+        const edits=[];
+        let x2=N,y2=M;
+        for(let d2=trace.length-1;d2>=0;d2--){
+          const vPrev=trace[d2],k2=x2-y2;
+          const prevK=(k2===-d2||(k2!==d2&&(vPrev[k2-1]??-1)<(vPrev[k2+1]??-1)))?k2+1:k2-1;
+          const prevX=vPrev[prevK]??0,prevY=prevX-prevK;
+          while(x2>prevX&&y2>prevY){edits.push({t:"eq",line:A[x2-1]});x2--;y2--}
+          if(d2===0)break;
+          if(x2>prevX){edits.push({t:"del",line:A[x2-1]});x2--}
+          else if(y2>prevY){edits.push({t:"add",line:B[y2-1]});y2--}
+        }
+        return edits.reverse();
+      }
+    }
+    trace.push(v2);Object.assign(v,v2);
+  }
+  return B.map(line=>({t:"add",line}));
+}
+function renderDiffHtml(edits){
+  return '<div class="diffView">'+edits.map(e=>{
+    if(e.t==="eq")return '<div class="diff-eq">  '+esc(e.line)+'</div>';
+    if(e.t==="del")return '<div class="diff-del">- '+esc(e.line)+'</div>';
+    return '<div class="diff-add">+ '+esc(e.line)+'</div>';
+  }).join("")+'</div>';
+}
+
+/* Task ledger: preserve standing goal across "continue" / step-limit pauses */
+const Task={
+  CONT:/^\s*(?:(?:continue|keep going|carry on|resume|try again|retry|you stopped|didn'?t work)\b[\s\S]{0,40}|(?:go on|go|again|next|more|ok|okay|yes|yep|proceed|do it|go ahead|finish(?: it)?)(?:\s+(?:please|pls|now|it|that|again|thanks|from where you (?:left off|stopped)))?[\s.!,?]*)$/i,
+  st(){const c=cur();if(!c)return{goal:"",steps:[],cont:0};return c.task||(c.task={goal:"",steps:[],cont:0})},
+  isCont(t){t=String(t||"").trim();return t.length<=60&&this.CONT.test(t)},
+  begin(text){
+    const k=this.st();
+    if(this.isCont(text)&&k.goal){k.cont++;return{kind:"cont",eff:k.goal,summary:k.steps.slice(-10).join(" · ")}}
+    k.goal=String(text||"").replace(/\s+/g," ").trim().slice(0,500);
+    k.steps=[];k.cont=0;
+    return{kind:"new",eff:k.goal,summary:""};
+  },
+  trace(name,state){const k=this.st();k.steps.push(name+(state==="err"?"✗":"✓"));if(k.steps.length>24)k.steps=k.steps.slice(-16)},
+  block(){
+    const k=this.st();if(!k.goal)return"";
+    let s="\n\n## Standing Task\nGoal: "+k.goal;
+    if(k.steps.length)s+="\nDone so far: "+k.steps.slice(-12).join(" · ");
+    if(k.cont)s+="\nUser asked to continue — resume from where you left off; do not restart completed steps.";
+    return s;
+  }
+};
+
+/* Continuity governor: circuit-break identical failing tool loops (adapted for mobile) */
+const Continuity={
+  CAP:3,d:null,
+  EXEMPT:new Set(["get_vitals","list_facts","memory_stats","get_indexing_status","get_user_anchor","recall_memory","cancel_indexing"]),
+  sig(k){try{return k.name+"|"+JSON.stringify(k.args||{}).replace(/\s+/g," ").slice(0,400)}catch(_){return k.name+"|"}},
+  begin(){this.d={fail:{},count:{},blocks:0}},
+  gate(k){
+    if(!this.d)this.begin();
+    if(this.EXEMPT.has(k.name))return null;
+    const sig=this.sig(k);
+    this.d.count[sig]=(this.d.count[sig]||0)+1;
+    const failN=this.d.fail[sig]||0,rep=this.d.count[sig];
+    if(this.d.blocks>=this.CAP)return null;
+    if(failN>=2||rep>=5){
+      this.d.blocks++;
+      return{block:true,reason:failN>=2?"repeated failure":"repeated identical call",
+        payload:"BLOCKED BY CONTINUITY GOVERNOR: The call has failed repeatedly. Drop this sub-task and try a different approach, list real paths, or answer the user directly."};
+    }
+    return null;
+  },
+  after(k){if(!this.d)return;const sig=this.sig(k);if(k.state==="err")this.d.fail[sig]=(this.d.fail[sig]||0)+1;else delete this.d.fail[sig]}
+};
 const BLOOM=`<svg viewBox="0 0 32 32" class="kojot-logo" aria-hidden="true"><rect class="kj-ear-l" x="4" y="2" width="4" height="4" rx="1" fill="#f59e0b"/><rect x="4" y="6" width="4" height="4" rx="1" fill="#f59e0b"/><rect x="8" y="6" width="4" height="4" rx="1" fill="#d97706"/><rect class="kj-ear-r" x="24" y="2" width="4" height="4" rx="1" fill="#f59e0b"/><rect x="24" y="6" width="4" height="4" rx="1" fill="#f59e0b"/><rect x="20" y="6" width="4" height="4" rx="1" fill="#d97706"/><rect x="4" y="10" width="4" height="4" rx="1" fill="#f59e0b"/><rect x="8" y="10" width="4" height="4" rx="1" fill="#fbbf24"/><rect x="12" y="10" width="4" height="4" rx="1" fill="#f59e0b"/><rect x="16" y="10" width="4" height="4" rx="1" fill="#f59e0b"/><rect x="20" y="10" width="4" height="4" rx="1" fill="#fbbf24"/><rect x="24" y="10" width="4" height="4" rx="1" fill="#f59e0b"/><rect x="2" y="14" width="4" height="4" rx="1" fill="#f59e0b"/><rect x="6" y="14" width="4" height="4" rx="1" fill="#f6d28a"/><rect class="kj-eye" x="10" y="14" width="4" height="4" rx="1" fill="#171717"/><rect x="14" y="14" width="4" height="4" rx="1" fill="#fbbf24"/><rect class="kj-eye" x="18" y="14" width="4" height="4" rx="1" fill="#171717"/><rect x="22" y="14" width="4" height="4" rx="1" fill="#f6d28a"/><rect x="26" y="14" width="4" height="4" rx="1" fill="#f59e0b"/><rect x="6" y="18" width="4" height="4" rx="1" fill="#d97706"/><rect x="10" y="18" width="4" height="4" rx="1" fill="#f59e0b"/><rect x="14" y="18" width="4" height="4" rx="1" fill="#f6d28a"/><rect x="18" y="18" width="4" height="4" rx="1" fill="#f59e0b"/><rect x="22" y="18" width="4" height="4" rx="1" fill="#d97706"/><rect x="10" y="22" width="4" height="4" rx="1" fill="#d97706"/><rect x="14" y="22" width="4" height="4" rx="1" fill="#f6d28a"/><rect x="18" y="22" width="4" height="4" rx="1" fill="#d97706"/><rect x="14" y="26" width="4" height="3" rx="1" fill="#0f172a"/></svg>`;
 const THINK=`<span class="think">${BLOOM}Thinking<span class="dots"><span>.</span><span>.</span><span>.</span></span></span>`;
 const SUG=['Organize my Downloads folder','Find my biggest files','Search the web for today\'s news','Write a haiku about rain'];
@@ -459,11 +562,9 @@ const FT=[
  fn('write_file','Create or overwrite a text file.',{path:S('File path relative to the workspace root'),content:S('Full file contents to write'),overwrite:B('Replace existing file. Default false')},['path','content']),
  fn('edit_file','Replace exactly one unique text block in a file.',{path:S('File path'),search:S('Exact existing text block (must appear once)'),replace:S('Replacement text')},['path','search','replace']),
  fn('save_fact','Save a permanent fact, convention, or user preference into long-term memory.',{tag:S('Category e.g. ARCH, PREF, CONFIG'),content:S('Telegraphic fact under 20 words')},['tag','content']),
- fn('recall_files','Semantically find files across the workspace by purpose or description.',{query:S('What you are looking for'),limit:Nn('Max files (default 8)')},['query']),
- fn('compile_app','Compile the current workspace project or web app into an installable Android .apk file.',{project_dir:S('Path to project root containing AndroidManifest.xml or index.html'),app_name:S('Optional app label'),package_id:S('Optional package id e.g. com.example.app')},['project_dir']),
- fn('compiler_status','Check whether on-device aapt2/android.jar/shell dex are ready.',{},[])];
+ fn('recall_files','Semantically find files across the workspace by purpose or description.',{query:S('What you are looking for'),limit:Nn('Max files (default 8)')},['query'])];
 const WT=fn('web_search','Search the web for current information.',{query:S('Search query'),max_results:Nn('1-10')},['query']);
-const ASK=new Set(['forge_tool','delete_forged_tool','gh_commit','gh_create_pr','move','copy','delete','write_file','edit_file','compile_app']);
+const ASK=new Set(['forge_tool','delete_forged_tool','gh_commit','gh_create_pr','move','copy','delete','write_file','edit_file']);
 const searchReady=()=>{const p=PROV[cfg.search.prov];return p&&(p.need==='key'?!!cfg.search.keys[cfg.search.prov]:p.need==='sx'?!!cfg.search.sx:p.need==='cu'?!!cfg.search.cu:true)};
 function tools(){
   const t=[];
@@ -483,6 +584,8 @@ function sysFullBase(){let s=cfg.sys;if(tools().length){s+=`\n\nToday is ${new D
 function sysFull(){return sysFullBase()}
 async function sysFullWithMemory(userMsg){
   let s=sysFullBase();
+  // Standing task ledger (continue / step-limit resume)
+  try{s+=Task.block()}catch(_){}
   if(!NI||!window.Native)return s;
   try{
     let anchor='';
@@ -537,8 +640,6 @@ const TT={
  edit_file:{i:'file',v:['Editing','Edited','Edit'],o:a=>base(a.path||'file'),s:a=>a.path||''},
  save_fact:{i:'bulb',v:['Remembering','Remembered','Remember'],o:a=>'['+(a.tag||'NOTE')+']',s:a=>a.content||''},
  recall_files:{i:'find',v:['Recalling','Recalled','Recall'],o:a=>'workspace files for "'+(a.query||'…')+'"',s:(a,k)=>k.data&&k.data.files?k.data.files.length+' match(es)':''},
- compile_app:{i:'file',v:['Compiling','Compiled','Compile'],o:a=>(a.app_name||'APK')+' from '+(a.project_dir||'.'),s:(a,k)=>k.data&&k.data.apk?base(k.data.apk)+(k.data.signed?' (signed)':' (unsigned)'):''},
- compiler_status:{i:'file',v:['Checking','Checked','Check'],o:()=>'compiler tools',s:(a,k)=>k.data?(k.data.ready?'tools ready':'tools incomplete'):''},
  gh_get_issue:{i:'globe',v:['Fetching','Fetched','Fetch'],o:a=>'GitHub issue #'+(a.issue_number||''),s:(a,k)=>k.data?k.data.title||'':''},
  gh_read_file:{i:'file',v:['Reading','Read','Read'],o:a=>base(a.path||'file')+' from GitHub',s:a=>a.path||''},
  gh_commit:{i:'globe',v:['Committing','Committed','Commit'],o:a=>base(a.path||'file')+' to '+((a.branch||'').replace('refs/heads/','')),s:a=>a.message||''},
@@ -555,9 +656,9 @@ function bodyHTML(k){const a=k.args||{},d=k.data||{};let h='';
  else if(d.results){h=(d.answer?`<div class="ans">${esc(d.answer)}</div>`:'')+d.results.map(r=>{let dm='';try{dm=new URL(r.u).hostname.replace(/^www\./,'')}catch{}return`<a class="sr" href="${ea(r.u)}" target="_blank" rel="noopener"><s>${esc((dm||'?')[0].toUpperCase())}</s><div><b>${esc(r.t||dm)}</b><small>${esc(dm)}</small><p>${esc(r.c||'')}</p></div></a>`}).join('')}
  else if(k.name==='read_file'&&k.res)h='<pre>'+esc(k.res)+'</pre>';
  else if(k.name==='write_file')h='<div class="ln">'+ic('file')+'<span>'+esc(a.path||'')+'</span><i>'+fmt((a.content||'').length)+'</i></div>';
- else if(k.name==='edit_file')h='<div class="ln">'+ic('file')+'<span>'+esc(a.path||'')+'</span></div><pre>Search: '+esc((a.search||'').slice(0,120))+'\nReplace: '+esc((a.replace||'').slice(0,120))+'</pre>';
+ else if(k.name==='edit_file'){h='<div class="ln">'+ic('file')+'<span>'+esc(a.path||'')+'</span></div>';
+  try{h+=renderDiffHtml(myersDiff(a.search||'',a.replace||''))}catch(_){h+='<pre>Search: '+esc((a.search||'').slice(0,120))+'\nReplace: '+esc((a.replace||'').slice(0,120))+'</pre>'}}
  else if(k.name==='save_fact')h='<div class="ans"><b>['+esc(a.tag||'NOTE')+']</b> '+esc(a.content||'')+'</div>';
- else if(k.name==='compile_app'&&d.apk)h='<div class="ln">'+ic('file')+'<span>'+esc(base(d.apk))+'</span><i>'+(d.signed?'signed':'unsigned')+'</i></div>'+(d.ok?'<div style="margin-top:8px"><button class="btn sm" onclick="nat(\'install_apk\',{path:\''+ea(d.apk)+'\'}).catch(e=>alert(e.message))">Install APK</button></div>':'');
  else if(k.name==='gh_create_pr'&&d.url)h='<div class="ans"><a href="'+ea(d.url)+'" target="_blank" rel="noopener">Pull Request #'+esc(d.pr||'')+': '+esc(a.title||'')+'</a></div>';
  else if(k.name==='gh_commit'&&d.commit_url)h='<div class="ans"><a href="'+ea(d.commit_url)+'" target="_blank" rel="noopener">Commit on '+esc(a.branch||'')+'</a></div>';
  if(!h&&k.state!=='err'&&k.state!=='prep')h=`<pre>${esc(J.stringify(a,null,1))}</pre>`;
@@ -586,7 +687,7 @@ function render(){const c=cur(),th=$('#th');th.innerHTML='';
   d.innerHTML=`${imgH}<div>${esc(m.content)}</div>${tStr?`<time class="ts">${tStr}</time>`:''}`}
   else{d.className='turn a';d.innerHTML=turnHTML();const last=i===c.messages.length-1;paint(d,m,last,i);
    if(m.error)d.insertAdjacentHTML('beforeend',`<div class="notice"><div><b>Couldn't reach the model.</b> ${esc(m.error)}. Is llama-server running at ${esc(cfg.url)}?</div><button data-retry>Retry</button></div>`);
-   else if(!(busy&&last)&&m.content)d.insertAdjacentHTML('beforeend',`<div class="acts"><button class="ib" data-cp aria-label="Copy">${I.copy}</button>${last?`<button class="ib" data-retry aria-label="Regenerate">${I.redo}</button>`:''}</div>`)}
+   else if(!(busy&&last)&&m.content)d.insertAdjacentHTML('beforeend',`<div class="acts"><button class="ib" data-cp aria-label="Copy" title="Copy">${I.copy}</button><button class="ib" data-dl aria-label="Download Markdown" title="Download .md">${I.dl}</button>${last?`<button class="ib" data-retry aria-label="Regenerate">${I.redo}</button>`:''}</div>`)}
   th.appendChild(d)});
  hist();sc()}
 function refresh(a){const c=cur(),i=c.messages.indexOf(a),d=$('#th').children[i];if(d){d.querySelector('.calls').innerHTML=callsHTML(a);sc()}}
@@ -622,7 +723,6 @@ function condenseTool(k) {
   if (k.name === "move" || k.name === "copy") return "[" + k.name + " OK]";
   if (k.name === "delete") return "[Deleted: OK]";
   if (k.name === "save_fact") return "[Saved fact: OK]";
-  if (k.name === "compile_app") return "[Compiled APK: " + (k.data?.ok ? "OK" : "FAIL") + "]";
   if (k.name === "web_search") return "[Web search: " + (k.data?.results?.length || 0) + " results used]";
   if (k.name === "get_vitals") return "[Vitals: " + (k.data?.battery_pct || "?") + "% battery]";
   if (k.name.startsWith("gh_")) return "[GitHub " + k.name + ": OK]";
@@ -666,7 +766,7 @@ function apiMsgs(c) {
       });
       const isCurrentTurn = (m === lastAsst);
       m.calls.forEach(k => {
-        const payload = isCurrentTurn ? (k.res || "(no result)") : condenseTool(k);
+        const payload = scrubJunk(isCurrentTurn ? (k.res || "(no result)") : condenseTool(k));
         out.push({ role: "tool", tool_call_id: k.id, content: payload });
       });
     } else if (m.content) {
@@ -900,16 +1000,29 @@ async function execCalls(a){const L=a.calls;
   if(k.state==='err')continue;
   if(k.state==='ask'){const ok=await gate.get(k.id).p;gate.delete(k.id);if(!ok){k.state=stopped?'skip':'denied';k.res=stopped?'Stopped by the user.':'The user declined this action.';refresh(a);continue}}
   if(stopped){k.state='skip';k.res='Stopped by the user.';refresh(a);continue}
+  // Continuity pre-flight: block identical failing / looping tool calls
+  const g=Continuity.gate(k);
+  if(g&&g.block){
+    k.state='err';k.res=g.payload;Task.trace(k.name,'err');Continuity.after(k);refresh(a);continue;
+  }
   k.state='run';refresh(a);const t0=performance.now();
-  try{const r=await runTool(k);k.res=String(r.text||'').slice(0,3500);k.data=r.data;k.state='ok'}catch(e){k.res='Error: '+(e.message||e);k.state='err'}
+  try{
+    const r=await runTool(k);
+    k.res=scrubJunk(String(r.text||'')).slice(0,3500);
+    k.data=r.data;k.state='ok';
+  }catch(e){k.res=scrubJunk('Error: '+(e.message||e));k.state='err'}
+  Continuity.after(k);Task.trace(k.name,k.state);
   const dt=performance.now()-t0;if(dt<380)await sleep(380-dt);k.ms=Math.round(performance.now()-t0);refresh(a)}
  save()}
 function stopAll(){stopped=true;if(ctrl)ctrl.abort();gate.forEach(g=>g.r(false))}
 async function run(c){setBusy(true);stopped=false;let steps=0;
  try{
-  // Inject edge memory once per user turn (capped ≤400 tokens)
+  // Inject edge memory + standing task once per user turn
   const lastUser=[...c.messages].reverse().find(m=>m.role==='user');
-  _sysMem=await sysFullWithMemory(lastUser?lastUser.content:'');
+  const userText=lastUser?lastUser.content:'';
+  Task.begin(userText);
+  Continuity.begin();
+  _sysMem=await sysFullWithMemory(Task.isCont(userText)&&Task.st().goal?Task.st().goal:userText);
   for(;;){const a=c.messages.at(-1);a.error='';a.content=a.content||'';render();
    await turn(c,a);if(stopped){delete a.calls;break}if(a.error||!a.calls||!a.calls.length)break;
    await execCalls(a);if(stopped)break;
@@ -1104,14 +1217,6 @@ function paneTools(){return`<div class="pane" data-p="tool"><div class="sec">Pho
  </div>
 <div class="tst" id="coder-m"></div>
 
- <div class="sec">APK compiler</div>
- <div class="set"><div class="lt"><span>On-device build</span><small id="cmp-s">aapt2 · d8 · shell</small></div></div>
- <div class="r2" style="margin-top:6px;flex-wrap:wrap">
-  <button class="btn sm" id="cmp-status">Check tools</button>
-  <button class="btn sm" id="cmp-build">Build APK from workspace</button>
- </div>
- <div class="tst" id="cmp-m" style="max-height:160px;overflow:auto;white-space:pre-wrap;font-family:var(--mono);font-size:11px"></div>
- 
  <div class="sec">GitHub Integration</div>
  <div class="fi"><label>Personal Access Token (classic with repo scope)</label><input class="in" type="password" data-k="github.token" data-t="str" placeholder="ghp_..."></div>
  <div class="fi"><label>Default Repository (owner/repo)</label><input class="in" data-k="github.repo" data-t="str" placeholder="420garbage420/kojot"></div>
@@ -1347,12 +1452,6 @@ $('#s-body').addEventListener('click',async e=>{const t=e.target;let b;
    return;
  }
  
- if(t.closest('#cmp-status')){const m=$('#cmp-m');m.style.color='var(--fg-2)';m.textContent='Checking…';try{const r=JSON.parse(await nat('compiler_status',{}));m.style.color=r.data&&r.data.ready?'var(--success)':'var(--danger)';m.textContent=r.text;$('#cmp-s').textContent=r.text}catch(x){m.style.color='var(--danger)';m.textContent=x.message}return}
- if(t.closest('#cmp-build')){const m=$('#cmp-m');if(!confirm('Compile the workspace root into an APK? This may take a minute.'))return;m.style.color='var(--fg-2)';m.textContent='Building…';try{const r=JSON.parse(await nat('compile_app',{project_dir:'.'}));const ok=r.data&&r.data.ok;m.style.color=ok?'var(--success)':'var(--danger)';
-   let log='';if(r.data&&r.data.logs){log='\n'+r.data.logs.map(l=>'['+l.step+'] '+l.text).join('\n')}
-   m.textContent=(r.text||'')+log;
-   if(ok&&r.data.apk){const b=document.createElement('button');b.className='btn sm';b.textContent='Install APK';b.style.marginTop='8px';b.onclick=async()=>{try{await nat('install_apk',{path:r.data.apk})}catch(e){alert(e.message)}};m.appendChild(document.createElement('br'));m.appendChild(b)}
-  }catch(x){m.style.color='var(--danger)';m.textContent=x.message}return}
  if(t.closest('#s-test')){const m=$('#tst');m.style.color='var(--fg-2)';m.textContent='Testing…';const ok=await ping();m.style.color=ok?'var(--success)':'var(--danger)';m.textContent=ok?'Connected to llama-server.':'Could not reach the server.';return}
  if(t.closest('#ctx-restart')){const m=$('#ctx-m');saveCfg();m.style.color='var(--fg-2)';m.textContent='Restarting…';try{await nat('restart',{srv:cfg.srv});m.style.color='var(--success)';m.textContent='Server restarting with ctx '+(cfg.srv.ctx||8192)+'.';done()}catch(x){m.style.color='var(--danger)';m.textContent=x.message}return}
  if(t.closest("#gh-test")){
@@ -1407,7 +1506,8 @@ $('#th').onclick=e=>{const t=e.target;if(t.closest('.chip'))return send(t.textCo
  if(b=t.closest('[data-x]')){const card=b.closest('.tc'),id=card.dataset.id;card.classList.toggle('open');card.classList.contains('open')?openSet.add(id):openSet.delete(id);return}
  if(b=t.closest('[data-th]')){const d=b.closest('.turn'),k=cid+':'+[...$('#th').children].indexOf(d);d.querySelector('.tho').classList.toggle('open');thOpen.has(k)?thOpen.delete(k):thOpen.add(k);return}
  if(b=t.closest('[data-copy]')){navigator.clipboard.writeText(b.closest('.code').querySelector('code').textContent);b.textContent='Copied';setTimeout(()=>b.textContent='Copy',1200)}
- if(t.closest('[data-cp]')){const c=cur(),m=c.messages[[...$('#th').children].indexOf(t.closest('.turn'))];navigator.clipboard.writeText(m.content)}
+ if(t.closest('[data-cp]')){const c=cur(),m=c.messages[[...$('#th').children].indexOf(t.closest('.turn'))];navigator.clipboard.writeText(m&&m.content||'')}
+ if(t.closest('[data-dl]')){const c=cur(),m=c.messages[[...$('#th').children].indexOf(t.closest('.turn'))];if(!m||!m.content)return;const ts=new Date().toISOString().slice(0,19).replace(/[:T]/g,'-');const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([m.content],{type:'text/markdown'}));a.download='kojot-'+ts+'.md';a.click();setTimeout(()=>URL.revokeObjectURL(a.href),4000)}
  if(t.closest('[data-retry]')){const c=cur(),m=c&&c.messages.at(-1);if(m&&m.role==='assistant'&&!busy){m.content='';m.thought='';m.error='';delete m.calls;run(c)}}};
 $('#st').onclick=()=>sheet(true);$('#ss').onclick=e=>{if(e.target.id==='ss')done()};$('#s-x').onclick=$('#s-ok').onclick=done;
 document.addEventListener('visibilitychange',()=>{if(!document.hidden){ninfo();filesUI()}});

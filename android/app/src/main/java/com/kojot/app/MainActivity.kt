@@ -98,13 +98,6 @@ class MainActivity : Activity() {
         } catch (e: Exception) {
             Log.e("Kojot", "Memory init failed: ${e.message}")
         }
-        thread {
-            try {
-                CompilerTools.ensureExtracted(this@MainActivity, File(filesDir, "compiler_tools"))
-            } catch (e: Exception) {
-                Log.w("Kojot", "compiler tools extract: ${e.message}")
-            }
-        }
         if (model.exists()) start() else pickModel()
     }
 
@@ -392,7 +385,6 @@ class MainActivity : Activity() {
         "start_indexing", "get_indexing_status", "cancel_indexing",
         "list_facts", "clear_facts", "memory_stats", "get_user_anchor", "set_user_anchor"
     )
-    private val compilerOps = setOf("compile_app", "compiler_status")
 
     private fun getVitals(): JSONObject {
         val ifilter = android.content.IntentFilter(android.content.Intent.ACTION_BATTERY_CHANGED)
@@ -504,36 +496,6 @@ class MainActivity : Activity() {
                 mem().run(op, a)
             }
         }
-        in compilerOps -> {
-            val tools = File(filesDir, "compiler_tools")
-            CompilerTools.ensureExtracted(this, tools)
-            CompilerTools(this, tools).run(op, a, rootDir())
-        }
-        "install_apk" -> {
-            val path = a.optString("path", "").trim()
-            if (path.isEmpty()) throw ToolError("path is required")
-            val f = File(path).canonicalFile
-            if (!f.isFile || !f.name.endsWith(".apk", ignoreCase = true))
-                throw ToolError("APK not found: $path")
-            runOnUiThread {
-                try {
-                    val pub = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), f.name)
-                    if (f.absolutePath != pub.absolutePath) {
-                        f.copyTo(pub, overwrite = true)
-                    }
-                    val uri = Uri.parse("content://$packageName.provider${pub.absolutePath}")
-                    val intent = Intent(Intent.ACTION_VIEW).apply {
-                        setDataAndType(uri, "application/vnd.android.package-archive")
-                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                    }
-                    startActivity(intent)
-                } catch (e: Exception) {
-                    Log.e("Kojot", "install_apk: ${e.message}")
-                }
-            }
-            JSONObject().put("text", "install prompt opened for ${f.name}")
-        }
         else -> {
             if (!filesOk()) throw ToolError("Files access isn't granted yet. Open Settings → Tools → Files and tap Grant.")
             FileTools(rootDir()).run(op, a)
@@ -560,7 +522,6 @@ class MainActivity : Activity() {
                 .put("embed_model", embPresent)
                 .put("coder_model", coderModel.exists())
                 .put("active_slot", activeSlot)
-                .put("compiler", File(filesDir, "compiler_tools/aapt2").canExecute())
                 .toString()
         }
 
