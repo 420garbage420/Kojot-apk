@@ -1327,21 +1327,7 @@ $('#s-body').addEventListener('click',async e=>{const t=e.target;let b;
    }
    return;
  }
- if(false && if(t.closest('#coder-save')){
-   const ctx = +$('#coder-ctx').value || 32768;
-   const m = $('#coder-m');
-   m.style.color = 'var(--fg-2)';
-   m.textContent = 'Saving…';
-   try{
-     await nat('set_coder_srv', { srv: { ctx } });
-     m.style.color = 'var(--success)';
-     m.textContent = 'Saved Coder config (ctx: ' + ctx + ').';
-   }catch(x){
-     m.style.color = 'var(--danger)';
-     m.textContent = x.message;
-   }
-   return;
- }
+ 
  if(t.closest('#cmp-status')){const m=$('#cmp-m');m.style.color='var(--fg-2)';m.textContent='Checking…';try{const r=JSON.parse(await nat('compiler_status',{}));m.style.color=r.data&&r.data.ready?'var(--success)':'var(--danger)';m.textContent=r.text;$('#cmp-s').textContent=r.text}catch(x){m.style.color='var(--danger)';m.textContent=x.message}return}
  if(t.closest('#cmp-build')){const m=$('#cmp-m');if(!confirm('Compile the workspace root into an APK? This may take a minute.'))return;m.style.color='var(--fg-2)';m.textContent='Building…';try{const r=JSON.parse(await nat('compile_app',{project_dir:'.'}));const ok=r.data&&r.data.ok;m.style.color=ok?'var(--success)':'var(--danger)';
    let log='';if(r.data&&r.data.logs){log='\n'+r.data.logs.map(l=>'['+l.step+'] '+l.text).join('\n')}
