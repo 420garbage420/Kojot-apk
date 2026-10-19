@@ -1,12 +1,15 @@
 package com.kojot.app
 
 import android.app.Activity
+import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
+import android.content.ServiceConnection
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.os.Environment
+import android.os.IBinder
 import android.os.PowerManager
 import android.provider.Settings
 import android.util.Log
@@ -25,31 +28,91 @@ import java.net.URL
 import kotlin.concurrent.thread
 
 class MainActivity : Activity() {
-    private var proc: Process? = null
-    private var embProc: Process? = null
     private var tap: (() -> Unit)? = null
     private lateinit var msg: TextView
     private lateinit var web: WebView
-    private val model get() = File(filesDir, "model.gguf")
+    private val prefs by lazy { getSharedPreferences("lc", Context.MODE_PRIVATE) }
     private val embModel get() = File(filesDir, "nomic.gguf")
     private val coderModel get() = File(filesDir, "coder.gguf")
-    private val prefs by lazy { getSharedPreferences("lc", Context.MODE_PRIVATE) }
+
+    /** Prefer external path (no copy) when set and still readable; else fall back to copied filesDir/model.gguf */
+    private fun modelFile(): File {
+        val external = prefs.getString("model_path", null)
+        if (!external.isNullOrBlank()) {
+            val f = File(external)
+            if (f.isFile && f.canRead()) return f
+        }
+        return File(filesDir, "model.gguf")
+    }
+    private val model get() = modelFile()
     private var memory: MemoryTools? = null
 
     private var wakeLock: PowerManager.WakeLock? = null
-    private fun acquireWakeLock() {
+    private fun acquireWakeLock(tag: String = "kojot:work", ms: Long = 60 * 60 * 1000L) {
         try {
             val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
-            wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "kojot:indexer")
-            wakeLock?.acquire(30 * 60 * 1000L)
+            if (wakeLock?.isHeld != true) {
+                wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, tag)
+                wakeLock?.setReferenceCounted(false)
+                wakeLock?.acquire(ms)
+            }
         } catch (_: Exception) {}
     }
     private fun releaseWakeLock() {
         try { if (wakeLock?.isHeld == true) wakeLock?.release() } catch (_: Exception) {}
     }
+    private fun requestBatteryExemption() {
+        try {
+            val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
+            if (!pm.isIgnoringBatteryOptimizations(packageName)) {
+                val i = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
+                    data = Uri.parse("package:$packageName")
+                }
+                startActivity(i)
+            }
+        } catch (_: Exception) {}
+    }
 
     @Volatile private var backActive = false
-    @Volatile private var activeSlot: String = "chat"
+    private var llama: LlamaService? = null
+    private var bound = false
+    private val activeSlot: String get() = llama?.activeSlot ?: "chat"
+    private val embReady: Boolean get() = llama?.embReady == true
+
+    private val conn = object : ServiceConnection {
+        override fun onServiceConnected(name: ComponentName?, service: IBinder?) {
+            val binder = service as LlamaService.LocalBinder
+            llama = binder.getService()
+            bound = true
+            llama?.addReadyListener(readyCb)
+            if (llama?.ready == true) {
+                runOnUiThread { showWeb() }
+            } else if (llama?.isChatAlive() != true && model.exists()) {
+                prepareWww()
+                llama?.startServers()
+            }
+        }
+        override fun onServiceDisconnected(name: ComponentName?) {
+            llama?.removeReadyListener(readyCb)
+            llama = null
+            bound = false
+        }
+    }
+
+    private val readyCb: (Boolean, String?) -> Unit = { ok, err ->
+        runOnUiThread {
+            if (ok) showWeb()
+            else {
+                web.visibility = View.GONE
+                msg.visibility = View.VISIBLE
+                msg.text = err ?: "Model server failed"
+                if (hasCustomArgs()) {
+                    msg.text = (msg.text.toString()) + "\n\nTap to reset server settings and retry."
+                    tap = { prefs.edit().remove("srv").remove("srv_coder").apply(); restartServer() }
+                }
+            }
+        }
+    }
 
     @Deprecated("Deprecated in Java")
     override fun onBackPressed() {
@@ -68,7 +131,6 @@ class MainActivity : Activity() {
             throw ToolError("memory engine failed to start: ${e.javaClass.simpleName}: ${e.message}")
         }
     }
-    @Volatile private var embReady = false
 
     override fun onCreate(b: Bundle?) {
         super.onCreate(b)
@@ -98,8 +160,37 @@ class MainActivity : Activity() {
         } catch (e: Exception) {
             Log.e("Kojot", "Memory init failed: ${e.message}")
         }
-        if (model.exists()) start() else pickModel()
+        if (Build.VERSION.SDK_INT >= 33) {
+            try { requestPermissions(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), 99) } catch (_: Exception) {}
+        }
+        if (!prefs.getBoolean("battery_asked", false)) {
+            prefs.edit().putBoolean("battery_asked", true).apply()
+            requestBatteryExemption()
+        }
+        if (model.exists()) {
+            prepareWww()
+            bindAndStartService()
+        } else pickModel()
     }
+
+    private fun bindAndStartService() {
+        LlamaService.start(this)
+        bindService(Intent(this, LlamaService::class.java), conn, Context.BIND_AUTO_CREATE)
+    }
+
+    private fun showWeb() {
+        msg.visibility = View.GONE
+        web.visibility = View.VISIBLE
+        web.loadUrl("http://127.0.0.1:8080/")
+    }
+
+    private fun prepareWww() {
+        val www = File(filesDir, "www").apply { deleteRecursively(); mkdirs() }
+        val hasWww = try { (assets.list("www") ?: emptyArray()).isNotEmpty() } catch (_: Exception) { false }
+        if (hasWww) copyAssetDir("www", www)
+        else assets.open("index.html").use { i -> File(www, "index.html").outputStream().use { i.copyTo(it) } }
+    }
+
 
     private fun pickModel() {
         tap = { pickModel() }
@@ -121,6 +212,36 @@ class MainActivity : Activity() {
         }, REQ_CODER)
     }
 
+    /** Try to resolve a real filesystem path from a content/file URI (avoids GB-scale copies). */
+    private fun resolveRealPath(uri: Uri): String? {
+        try {
+            if ("file".equals(uri.scheme, ignoreCase = true)) return uri.path
+            // MediaStore / Downloads style
+            contentResolver.query(uri, arrayOf(android.provider.MediaStore.MediaColumns.DATA), null, null, null)?.use { c ->
+                if (c.moveToFirst()) {
+                    val idx = c.getColumnIndex(android.provider.MediaStore.MediaColumns.DATA)
+                    if (idx >= 0) {
+                        val path = c.getString(idx)
+                        if (!path.isNullOrBlank() && File(path).canRead()) return path
+                    }
+                }
+            }
+            // Some providers expose _data
+            contentResolver.query(uri, null, null, null, null)?.use { c ->
+                if (c.moveToFirst()) {
+                    for (col in arrayOf("_data", "filePath", "path")) {
+                        val idx = c.getColumnIndex(col)
+                        if (idx >= 0) {
+                            val path = c.getString(idx)
+                            if (!path.isNullOrBlank() && File(path).canRead()) return path
+                        }
+                    }
+                }
+            }
+        } catch (_: Exception) {}
+        return null
+    }
+
     @Deprecated("plain Activity keeps this dependency-free")
     override fun onActivityResult(r: Int, c: Int, d: Intent?) {
         val u = d?.data
@@ -129,6 +250,8 @@ class MainActivity : Activity() {
             return
         }
         val uri = d?.data ?: return
+        try { contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION) } catch (_: Exception) {}
+
         val fileName = try {
             contentResolver.query(uri, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
                 if (cursor.moveToFirst()) cursor.getString(0) else null
@@ -141,22 +264,40 @@ class MainActivity : Activity() {
             REQ_CODER -> fileName?.let { prefs.edit().putString("coder_name", it).apply() }
         }
 
-        val dest = when (r) {
-            REQ_MODEL -> model
-            REQ_EMB -> embModel
-            REQ_CODER -> coderModel
-            else -> return
-        }
         val label = when (r) {
             REQ_EMB -> "embedding model"
             REQ_CODER -> "coder model"
             else -> "model"
         }
+
+        // Prefer zero-copy: if we can get a real path, point at it directly (saves GB of storage + IO)
+        val realPath = resolveRealPath(uri)
+        if (realPath != null && r == REQ_MODEL) {
+            prefs.edit().putString("model_path", realPath).apply()
+            // Clean any previous copied model to reclaim space
+            File(filesDir, "model.gguf").let { if (it.exists()) it.delete() }
+            runOnUiThread {
+                msg.text = "Using model from directory (no copy):\n${File(realPath).name}"
+                start()
+            }
+            return
+        }
+        if (realPath != null && r == REQ_CODER) {
+            // For coder we still prefer a stable local file for swap reliability, but record path
+            prefs.edit().putString("coder_path", realPath).apply()
+        }
+
+        val dest = when (r) {
+            REQ_MODEL -> File(filesDir, "model.gguf")
+            REQ_EMB -> embModel
+            REQ_CODER -> coderModel
+            else -> return
+        }
         thread {
             try {
                 val tmp = File(filesDir, "$label.part")
-                val total = contentResolver.openFileDescriptor(u, "r")?.use { it.statSize } ?: 0L
-                contentResolver.openInputStream(u)!!.use { i ->
+                val total = contentResolver.openFileDescriptor(uri, "r")?.use { it.statSize } ?: 0L
+                contentResolver.openInputStream(uri)!!.use { i ->
                     tmp.outputStream().use { o ->
                         val buf = ByteArray(1 shl 20); var n = 0L; var last = 0L; var k: Int
                         while (i.read(buf).also { k = it } > 0) {
@@ -170,10 +311,14 @@ class MainActivity : Activity() {
                 }
                 if (dest.exists()) dest.delete()
                 tmp.renameTo(dest)
+                if (r == REQ_MODEL) {
+                    // Clear external path so we use the stable copy
+                    prefs.edit().remove("model_path").apply()
+                }
                 runOnUiThread {
                     if (r == REQ_MODEL) start()
                     else if (r == REQ_EMB) {
-                        thread { startEmbedding(File(applicationInfo.nativeLibraryDir, "libllama_server.so")) }
+                        llama?.restartServers()
                         msg.text = if (web.visibility == View.VISIBLE) msg.text else "Embedding model installed."
                     } else if (r == REQ_CODER) {
                         if (activeSlot == "coder") restartServer()
@@ -190,29 +335,6 @@ class MainActivity : Activity() {
         return if (activeSlot == "coder" && coderModel.exists()) coderModel else model
     }
 
-    private fun serverArgs(exe: String, www: String): List<String> {
-        val srvKey = if (activeSlot == "coder") "srv_coder" else "srv"
-        val s = try { JSONObject(prefs.getString(srvKey, "{}") ?: "{}") } catch (_: Exception) { JSONObject() }
-        val currentModel = activeModelFile()
-        val a = mutableListOf(exe, "-m", currentModel.path, "--host", "127.0.0.1", "--port", "8080", "--path", www, "--jinja")
-        fun num(key: String, flag: String, def: Int) {
-            val v = if (s.has(key)) s.optInt(key, 0) else def
-            if (v > 0) { a.add(flag); a.add(v.toString()) }
-        }
-        fun word(key: String, flag: String) {
-            val v = s.optString(key, "").trim()
-            if (Regex("[a-z0-9_]{1,12}").matches(v)) { a.add(flag); a.add(v) }
-        }
-        val defaultCtx = if (activeSlot == "coder") 32768 else 8192
-        num("ctx", "-c", defaultCtx); num("threads", "-t", 4); num("threads_batch", "-tb", 0)
-        num("batch", "-b", 0); num("ubatch", "-ub", 0); num("parallel", "-np", 1)
-        word("fa", "-fa"); word("ctk", "-ctk"); word("ctv", "-ctv")
-        if (s.optBoolean("mlock", false)) a.add("--mlock")
-        if (s.optBoolean("no_mmap", false)) a.add("--no-mmap")
-        s.optString("extra", "").trim().split(Regex("\\s+")).filter { it.isNotEmpty() }.forEach { a.add(it) }
-        return a
-    }
-
     private fun hasCustomArgs(): Boolean {
         val srvKey = if (activeSlot == "coder") "srv_coder" else "srv"
         val s = prefs.getString(srvKey, "{}") ?: "{}"
@@ -220,134 +342,43 @@ class MainActivity : Activity() {
     }
 
     private fun restartServer() {
-        val old = proc; proc = null
-        val oldEmb = embProc; embProc = null
-        embReady = false
-        web.visibility = View.GONE; msg.visibility = View.VISIBLE
-        start(old, oldEmb)
+        web.visibility = View.GONE
+        msg.visibility = View.VISIBLE
+        msg.text = "Restarting model…"
+        prepareWww()
+        if (llama != null) llama?.restartServers()
+        else {
+            bindAndStartService()
+        }
     }
 
     private fun swapModel(slot: String): JSONObject {
-        val targetSlot = if (slot == "coder") "coder" else "chat"
-        if (targetSlot == "coder" && !coderModel.exists()) {
-            return JSONObject().put("ok", false).put("error", "Coder model not installed").put("slot", activeSlot)
+        val svc = llama
+        if (svc == null) {
+            // Ensure service is up then swap
+            prepareWww()
+            bindAndStartService()
+            return JSONObject().put("ok", false).put("error", "Server starting — try swap again").put("slot", activeSlot)
         }
-        if (targetSlot == activeSlot && proc?.isAlive == true) {
-            return JSONObject().put("ok", true).put("slot", activeSlot).put("cached", true)
-        }
-        activeSlot = targetSlot
-        proc?.destroy()
-        try { proc?.waitFor() } catch (_: Exception) {}
-        proc = null
-        val www = File(filesDir, "www")
-        val exe = File(applicationInfo.nativeLibraryDir, "libllama_server.so")
-        val p = ProcessBuilder(serverArgs(exe.path, www.path)).redirectErrorStream(true).start()
-        proc = p
-        thread { p.inputStream.bufferedReader().forEachLine { Log.d("llama", it) } }
-        for (i in 0 until 40) {
-            if (!p.isAlive) {
-                return JSONObject().put("ok", false).put("error", "Exited with code ${p.exitValue()}").put("slot", activeSlot)
+        web.visibility = View.GONE
+        msg.visibility = View.VISIBLE
+        msg.text = "Switching model…"
+        val result = svc.swapModel(slot)
+        if (result.optBoolean("ok")) {
+            runOnUiThread { showWeb() }
+        } else {
+            runOnUiThread {
+                msg.text = result.optString("error", "Swap failed")
             }
-            try {
-                val c = URL("http://127.0.0.1:8080/health").openConnection() as HttpURLConnection
-                c.connectTimeout = 300; c.readTimeout = 300
-                if (c.responseCode == 200) {
-                    return JSONObject().put("ok", true).put("slot", activeSlot).put("model", activeModelFile().name)
-                }
-            } catch (_: Exception) {}
-            Thread.sleep(350)
         }
-        return JSONObject().put("ok", false).put("error", "Startup timed out").put("slot", activeSlot)
+        return result
     }
 
-    private fun copyAssetDir(assetPath: String, dest: File) {
-        val list = assets.list(assetPath) ?: emptyArray()
-        if (list.isEmpty()) {
-            assets.open(assetPath).use { i -> dest.outputStream().use { i.copyTo(it) } }
-            return
-        }
-        dest.mkdirs()
-        for (name in list) {
-            val childAsset = if (assetPath.isEmpty()) name else "$assetPath/$name"
-            copyAssetDir(childAsset, File(dest, name))
-        }
-    }
-
-    private fun startEmbedding(exe: File) {
-        embProc?.let { it.destroy(); try { it.waitFor() } catch (_: Exception) {} }
-        embProc = null
-        embReady = false
-        if (!embModel.exists()) return
-        try {
-            val args = listOf(
-                exe.path, "-m", embModel.path,
-                "--host", "127.0.0.1", "--port", "8081",
-                "--embedding", "-c", "512", "-t", "2"
-            )
-            val p = ProcessBuilder(args).redirectErrorStream(true).start()
-            embProc = p
-            thread { p.inputStream.bufferedReader().forEachLine { Log.d("llama-emb", it) } }
-            thread {
-                repeat(60) {
-                    if (!p.isAlive) return@thread
-                    try {
-                        val c = URL("http://127.0.0.1:8081/health").openConnection() as HttpURLConnection
-                        c.connectTimeout = 500; c.readTimeout = 500
-                        if (c.responseCode == 200) {
-                            embReady = true
-                            memory?.checkEmbedding()
-                            return@thread
-                        }
-                    } catch (_: Exception) {}
-                    Thread.sleep(500)
-                }
-            }
-        } catch (e: Exception) {
-            Log.e("llama-emb", "failed to start: ${e.message}")
-        }
-    }
-
-    private fun start(old: Process? = null, oldEmb: Process? = null) {
+    private fun start() {
         tap = null
         msg.text = "Loading model…"
-        thread {
-            old?.let { it.destroy(); try { it.waitFor() } catch (_: Exception) {} }
-            oldEmb?.let { it.destroy(); try { it.waitFor() } catch (_: Exception) {} }
-            val www = File(filesDir, "www").apply { deleteRecursively(); mkdirs() }
-            val hasWww = try { (assets.list("www") ?: emptyArray()).isNotEmpty() } catch (_: Exception) { false }
-            if (hasWww) copyAssetDir("www", www)
-            else assets.open("index.html").use { i -> File(www, "index.html").outputStream().use { i.copyTo(it) } }
-
-            val exe = File(applicationInfo.nativeLibraryDir, "libllama_server.so")
-            startEmbedding(exe)
-
-            val p = ProcessBuilder(serverArgs(exe.path, www.path)).redirectErrorStream(true).start()
-            proc = p
-            thread { p.inputStream.bufferedReader().forEachLine { Log.d("llama", it) } }
-            repeat(300) {
-                if (!p.isAlive) {
-                    runOnUiThread {
-                        msg.text = "Model server exited (code ${p.exitValue()})." +
-                            if (hasCustomArgs()) "\n\nTap to reset server settings and retry." else ""
-                        if (hasCustomArgs()) tap = { prefs.edit().remove("srv").remove("srv_coder").apply(); restartServer() }
-                    }
-                    return@thread
-                }
-                try {
-                    val c = URL("http://127.0.0.1:8080/health").openConnection() as HttpURLConnection
-                    if (c.responseCode == 200) {
-                        runOnUiThread {
-                            msg.visibility = View.GONE
-                            web.visibility = View.VISIBLE
-                            web.loadUrl("http://127.0.0.1:8080/")
-                        }
-                        return@thread
-                    }
-                } catch (_: Exception) {}
-                Thread.sleep(1000)
-            }
-            runOnUiThread { msg.text = "Server didn't become ready in time." }
-        }
+        prepareWww()
+        bindAndStartService()
     }
 
     private fun filesOk(): Boolean = if (Build.VERSION.SDK_INT >= 30) Environment.isExternalStorageManager() else true
@@ -448,12 +479,24 @@ class MainActivity : Activity() {
         "delete_emb" -> {
             if (embModel.exists()) embModel.delete()
             prefs.edit().remove("emb_name").apply()
-            embProc?.destroy(); embProc = null; embReady = false
+            // embedding process is owned by LlamaService; restart to drop it
+            llama?.restartServers()
             JSONObject().put("ok", true).put("text", "embedding model deleted")
         }
         "pick_coder" -> {
             runOnUiThread { pickCoder() }
             JSONObject().put("text", "coder picker opened")
+        }
+        "pick_model" -> {
+            runOnUiThread { pickModel() }
+            JSONObject().put("text", "model picker opened")
+        }
+        "delete_model" -> {
+            // Remove both external pointer and any local copy; does NOT wipe chats/prefs/memory
+            prefs.edit().remove("model_path").remove("model_name").apply()
+            File(filesDir, "model.gguf").let { if (it.exists()) it.delete() }
+            llama?.stopServers()
+            JSONObject().put("ok", true).put("text", "main model removed (data preserved)")
         }
         "swap_model" -> swapModel(a.optString("slot", "chat"))
         "set_coder_srv" -> {
@@ -488,7 +531,7 @@ class MainActivity : Activity() {
         }
         in memoryOps -> {
             if (op == "start_indexing") {
-                acquireWakeLock()
+                acquireWakeLock("kojot:indexer", 2 * 60 * 60 * 1000L)
                 mem().startIndexing(a.optBoolean("force", false), a.optInt("max", 10000)) {
                     releaseWakeLock()
                 }
@@ -512,6 +555,8 @@ class MainActivity : Activity() {
         fun info(): String {
             memory?.checkEmbedding()
             val embPresent = embModel.exists()
+            val m = modelFile()
+            val external = prefs.getString("model_path", null)
             return JSONObject()
                 .put("files", filesOk())
                 .put("root", rootDir().path)
@@ -522,6 +567,10 @@ class MainActivity : Activity() {
                 .put("embed_model", embPresent)
                 .put("coder_model", coderModel.exists())
                 .put("active_slot", activeSlot)
+                .put("model_present", m.isFile)
+                .put("model_name", prefs.getString("model_name", null) ?: m.name)
+                .put("model_path", m.path)
+                .put("model_external", !external.isNullOrBlank() && File(external).canRead())
                 .toString()
         }
 
@@ -535,8 +584,12 @@ class MainActivity : Activity() {
     }
 
     override fun onDestroy() {
-        proc?.destroy()
-        embProc?.destroy()
+        if (bound) {
+            try { llama?.removeReadyListener(readyCb) } catch (_: Exception) {}
+            try { unbindService(conn) } catch (_: Exception) {}
+            bound = false
+        }
+        // Do NOT stop LlamaService here — FGS keeps the model alive across Activity recreation
         memory?.close()
         releaseWakeLock()
         super.onDestroy()

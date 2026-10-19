@@ -410,7 +410,7 @@ textarea.in{height:auto;min-height:64px;padding:9px 12px;font:13px/19px var(--mo
 </div></div>
 <script>
 const $=s=>document.querySelector(s),LS=localStorage,J=JSON;
-const DEF={url:'http://127.0.0.1:8080',sys:'You are a helpful, concise assistant.',t:.7,m:1024,theme:'auto',power:false,thoughts:true,vision:false,coder_t:0.1,p_coder:{},srv_coder:{},xj_coder:'',files:true,ask:true,github:{token:'',repo:'420garbage420/kojot'},search:{on:true,prov:'tavily',keys:{},max:5,depth:'basic',sx:'',cu:'',cm:'GET',ch:'',cb:''},p:{},srv:{},xj:''};
+const DEF={url:'http://127.0.0.1:8080',sys:'You are a helpful, concise assistant.',t:.7,m:1024,theme:'auto',power:false,thoughts:true,vision:false,coder_t:0.1,p_coder:{},srv_coder:{},xj_coder:'',files:true,ask:true,github:{token:'',repo:'420garbage420/kojot'},search:{on:true,prov:'tavily',keys:{},max:5,depth:'basic',sx:'',cu:'',cm:'GET',ch:'',cb:''},p:{},srv:{},xj:'',project:{name:'',conventions:''},profile:'balanced',auto_coder:true,tool_cache:true};
 const saved=(()=>{try{return J.parse(LS.getItem('lc.cfg')||'{}')}catch{return{}}})();
 const cfg={...DEF,...saved,search:{...DEF.search,...saved.search,keys:{...(saved.search||{}).keys}},p:{...saved.p},srv:{...saved.srv}};
 if(cfg.xj && (cfg.xj.includes('enable_thinking') || cfg.xj.includes('qwen')) && !cfg.xj_coder){
@@ -523,12 +523,121 @@ const Continuity={
   },
   after(k){if(!this.d)return;const sig=this.sig(k);if(k.state==="err")this.d.fail[sig]=(this.d.fail[sig]||0)+1;else delete this.d.fail[sig]}
 };
+
+/* ========== Deep capabilities (resume, cache, project, approvals, profile) ========== */
+const Cap = {
+  // --- Persistent agent resume ---
+  saveRun(c){
+    try{
+      if(!c||!c.messages||!c.messages.length)return;
+      const last=c.messages.at(-1);
+      const pending=last&&last.role==='assistant'&&(last.calls||[]).some(k=>!['ok','err','denied','skip'].includes(k.state));
+      const interrupted=busy||pending||(last&&last.role==='assistant'&&!last.content&&!last.error);
+      if(!interrupted&&!(c.task&&c.task.goal)){LS.removeItem('lc.resume');return}
+      const snap={id:c.id,title:c.title||'',task:c.task||null,ts:Date.now(),
+        messages:c.messages.slice(-24).map(m=>({role:m.role,content:(m.content||'').slice(0,4000),
+          calls:(m.calls||[]).map(k=>({id:k.id,name:k.name,args:k.args,state:k.state,res:(k.res||'').slice(0,800)}))}))};
+      LS.setItem('lc.resume',J.stringify(snap));
+    }catch(_){}
+  },
+  loadResume(){try{return J.parse(LS.getItem('lc.resume')||'null')}catch{return null}},
+  clearResume(){try{LS.removeItem('lc.resume')}catch(_){}},
+  offerResume(){
+    const r=this.loadResume();if(!r||!r.task||!r.task.goal)return;
+    if(Date.now()-(r.ts||0)>6*3600*1000){this.clearResume();return}
+    const hero=$('.hero');if(!hero||$('#resume-banner'))return;
+    const b=document.createElement('div');
+    b.id='resume-banner';
+    b.className='notice';
+    b.style.cssText='max-width:560px;margin:8px auto 0;text-align:start';
+    b.innerHTML=`<div><b>Resume last agent run?</b><br><span style="color:var(--fg-2)">${esc((r.task.goal||'').slice(0,120))}</span></div>
+      <div style="display:flex;gap:8px;margin-top:8px">
+        <button class="go" id="resume-go" style="height:32px;padding:0 14px;border-radius:999px;background:var(--accent);color:var(--on-accent);border:0;font-weight:500">Resume</button>
+        <button id="resume-dismiss" style="height:32px;padding:0 14px;border-radius:999px;border:1px solid var(--line-strong);font-weight:500">Dismiss</button>
+      </div>`;
+    hero.appendChild(b);
+    $('#resume-go').onclick=()=>{
+      let c=chats.find(x=>x.id===r.id);
+      if(!c){c={id:r.id,title:r.title||'Resumed',messages:r.messages||[],task:r.task};chats.unshift(c)}
+      else{c.task=r.task;if(!c.messages.length)c.messages=r.messages||[]}
+      cid=c.id;this.clearResume();save();render();
+      // nudge continue
+      send('continue');
+    };
+    $('#resume-dismiss').onclick=()=>{this.clearResume();b.remove()};
+  },
+
+  // --- Tool result cache (read-only tools) ---
+  _cache:new Map(),
+  CACHEABLE:new Set(['list_dir','find_files','read_file','list_facts','memory_stats','get_user_anchor','recall_memory','recall_files']),
+  cacheKey(name,args){try{return name+'|'+J.stringify(args||{})}catch{return name}},
+  getCached(name,args){
+    if(!cfg.tool_cache||!this.CACHEABLE.has(name))return null;
+    const e=this._cache.get(this.cacheKey(name,args));
+    if(!e)return null;
+    if(Date.now()-e.ts>5*60*1000){this._cache.delete(this.cacheKey(name,args));return null}
+    return e.val;
+  },
+  setCached(name,args,val){
+    if(!cfg.tool_cache||!this.CACHEABLE.has(name))return;
+    if(this._cache.size>80){const k=this._cache.keys().next().value;this._cache.delete(k)}
+    this._cache.set(this.cacheKey(name,args),{ts:Date.now(),val:val});
+  },
+
+  // --- Approval memory ---
+  _allow:null,
+  loadAllow(){if(this._allow)return this._allow;try{this._allow=J.parse(LS.getItem('lc.allow')||'[]')}catch{this._allow=[]}return this._allow},
+  saveAllow(){try{LS.setItem('lc.allow',J.stringify(this._allow||[]))}catch(_){}},
+  allowSig(k){const a=k.args||{};const path=a.path||a.dst||(Array.isArray(a.paths)?a.paths[0]:'')||(Array.isArray(a.src)?a.src[0]:'')||'';
+    return k.name+'|'+(String(path).split('/').slice(0,2).join('/')||'*')},
+  isRemembered(k){return this.loadAllow().includes(this.allowSig(k))},
+  remember(k){const s=this.allowSig(k);const L=this.loadAllow();if(!L.includes(s)){L.push(s);if(L.length>80)L.shift();this._allow=L;this.saveAllow()}},
+  clearAllow(){this._allow=[];this.saveAllow()},
+
+  // --- Project mode ---
+  projectBlock(){
+    const pr=cfg.project||{};
+    if(!pr.name&&!pr.conventions)return'';
+    let s='\n\n## Active Project';
+    if(pr.name)s+='\nName: '+pr.name;
+    if(NI&&NI.root)s+='\nWorkspace: '+NI.root;
+    if(pr.conventions)s+='\nConventions: '+String(pr.conventions).slice(0,600);
+    return s;
+  },
+
+  // --- Thermal / battery profile ---
+  async applyProfile(){
+    try{
+      const v=J.parse(await nat('get_vitals',{}));
+      const d=v.data||{};
+      const thermal=d.thermal||'normal';
+      const bat=d.battery_pct??100;
+      const low=bat<20&&!d.charging;
+      const hot=thermal==='moderate'||thermal==='severe'||thermal==='critical';
+      if(cfg.profile==='efficiency'||low||hot){
+        // Soft-throttle: lower max tokens for this session if very constrained
+        if(hot&&cfg.m>512){/* advisory only — server flags need restart */}
+        return{mode:'efficiency',thermal,bat,note:hot?'Device is warm — prefer shorter steps.':(low?'Battery low — keep tool use minimal.':'')};
+      }
+      if(cfg.profile==='max')return{mode:'max',thermal,bat,note:''};
+      return{mode:'balanced',thermal,bat,note:''};
+    }catch{return{mode:cfg.profile||'balanced',thermal:'unknown',bat:100,note:''}}
+  },
+
+  // --- Auto coder routing hint ---
+  codingIntent(text){
+    if(!cfg.auto_coder)return false;
+    const t=String(text||'').toLowerCase();
+    return /\b(code|refactor|implement|fix|bug|function|class|compile|gradle|kotlin|typescript|javascript|python|diff|patch|monaco|editor|file\s+edit|write\s+code)\b/.test(t);
+  }
+};
+
 const BLOOM=`<svg viewBox="0 0 32 32" class="kojot-logo" aria-hidden="true"><rect class="kj-ear-l" x="4" y="2" width="4" height="4" rx="1" fill="#f59e0b"/><rect x="4" y="6" width="4" height="4" rx="1" fill="#f59e0b"/><rect x="8" y="6" width="4" height="4" rx="1" fill="#d97706"/><rect class="kj-ear-r" x="24" y="2" width="4" height="4" rx="1" fill="#f59e0b"/><rect x="24" y="6" width="4" height="4" rx="1" fill="#f59e0b"/><rect x="20" y="6" width="4" height="4" rx="1" fill="#d97706"/><rect x="4" y="10" width="4" height="4" rx="1" fill="#f59e0b"/><rect x="8" y="10" width="4" height="4" rx="1" fill="#fbbf24"/><rect x="12" y="10" width="4" height="4" rx="1" fill="#f59e0b"/><rect x="16" y="10" width="4" height="4" rx="1" fill="#f59e0b"/><rect x="20" y="10" width="4" height="4" rx="1" fill="#fbbf24"/><rect x="24" y="10" width="4" height="4" rx="1" fill="#f59e0b"/><rect x="2" y="14" width="4" height="4" rx="1" fill="#f59e0b"/><rect x="6" y="14" width="4" height="4" rx="1" fill="#f6d28a"/><rect class="kj-eye" x="10" y="14" width="4" height="4" rx="1" fill="#171717"/><rect x="14" y="14" width="4" height="4" rx="1" fill="#fbbf24"/><rect class="kj-eye" x="18" y="14" width="4" height="4" rx="1" fill="#171717"/><rect x="22" y="14" width="4" height="4" rx="1" fill="#f6d28a"/><rect x="26" y="14" width="4" height="4" rx="1" fill="#f59e0b"/><rect x="6" y="18" width="4" height="4" rx="1" fill="#d97706"/><rect x="10" y="18" width="4" height="4" rx="1" fill="#f59e0b"/><rect x="14" y="18" width="4" height="4" rx="1" fill="#f6d28a"/><rect x="18" y="18" width="4" height="4" rx="1" fill="#f59e0b"/><rect x="22" y="18" width="4" height="4" rx="1" fill="#d97706"/><rect x="10" y="22" width="4" height="4" rx="1" fill="#d97706"/><rect x="14" y="22" width="4" height="4" rx="1" fill="#f6d28a"/><rect x="18" y="22" width="4" height="4" rx="1" fill="#d97706"/><rect x="14" y="26" width="4" height="3" rx="1" fill="#0f172a"/></svg>`;
 const THINK=`<span class="think">${BLOOM}Thinking<span class="dots"><span>.</span><span>.</span><span>.</span></span></span>`;
-const SUG=['Organize my Downloads folder','Find my biggest files','Search the web for today\'s news','Write a haiku about rain'];
+const SUG=['Continue my last task','Organize my Downloads folder','Find my biggest files','Search the web for today\'s news','Summarize this project','Write a haiku about rain'];
 const esc=t=>String(t).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])),ea=t=>esc(t).replace(/"/g,'&quot;');
 const cur=()=>chats.find(c=>c.id===cid);
-const save=()=>{try{LS.setItem('lc.chats',J.stringify(chats.slice(0,60)));LS.setItem('lc.cur',cid||'')}catch{}};
+const save=()=>{try{LS.setItem('lc.chats',J.stringify(chats.slice(0,60)));LS.setItem('lc.cur',cid||'');const c=cur();if(c)Cap.saveRun(c)}catch{}};
 const saveCfg=()=>LS.setItem('lc.cfg',J.stringify(cfg));
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 function getPath(o,p){return p.split('.').reduce((t,k)=>t?.[k],o)}
@@ -585,7 +694,7 @@ function sysFull(){return sysFullBase()}
 async function sysFullWithMemory(userMsg){
   let s=sysFullBase();
   // Standing task ledger (continue / step-limit resume)
-  try{s+=Task.block()}catch(_){}
+  try{s+=Task.block()+Cap.projectBlock()}catch(_){}
   if(!NI||!window.Native)return s;
   try{
     let anchor='';
@@ -612,11 +721,27 @@ const PROV={
  searxng:{n:'SearXNG',need:'sx',req:(q,n,s)=>({url:s.sx.replace(/\/$/,'')+'/search?format=json&q='+encodeURIComponent(q),method:'GET',headers:{}}),norm:j=>({answer:(j.answers||[])[0],results:(j.results||[]).map(r=>({t:r.title,u:r.url,c:r.content}))})},
  custom:{n:'Custom',need:'cu',req:(q,n,s)=>{let h={};try{h=J.parse(s.ch||'{}')}catch{}const f=t=>t.replace(/\{query\}/g,encodeURIComponent(q)).replace(/\{n\}/g,n);return{url:f(s.cu),method:s.cm,headers:h,body:s.cm==='GET'?'':(s.cb||'').replace(/\{query\}/g,J.stringify(q).slice(1,-1)).replace(/\{n\}/g,n)}},norm:generic}};
 async function httpx(r){if(window.Native)return J.parse(await nat('http',r));const x=await fetch(r.url,{method:r.method,headers:r.headers,body:r.method==='GET'?undefined:r.body});return{status:x.status,body:await x.text()}}
-async function webSearch(q,n){const s=cfg.search,p=PROV[s.prov];if(!q)throw Error('query is required');if(!searchReady())throw Error('Web search is not set up — add a key in Settings → Tools');
- n=Math.max(1,Math.min(+n||s.max,10));const x=await httpx(p.req(q,n,s));if(x.status>=400)throw Error(`${p.n} returned HTTP ${x.status}: ${x.body.slice(0,140)}`);
- let j=null;try{j=J.parse(x.body)}catch{}const o=j?p.norm(j):{results:[],raw:x.body.slice(0,1500)};const rs=o.results.filter(r=>r.u).slice(0,n);
- const text=[o.answer?'Answer: '+String(o.answer).slice(0,600):'',...rs.map((r,i)=>`${i+1}. ${r.t||r.u}\n${r.u}\n${String(r.c||'').slice(0,300)}`),!rs.length&&o.raw?o.raw:'',!rs.length&&!o.raw?'No results.':''].filter(Boolean).join('\n\n');
- return{text,data:{answer:o.answer&&String(o.answer).slice(0,600),results:rs.map(r=>({t:r.t,u:r.u,c:String(r.c||'').slice(0,200)})),prov:p.n}}}
+async function webSearch(q,n){const s=cfg.search,p=PROV[s.prov];if(!q)throw Error('query is required');
+ n=Math.max(1,Math.min(+n||s.max,10));
+ async function offlineFallback(reason){
+   let facts='';
+   try{const r=J.parse(await nat('recall_memory',{query:q,limit:6}));facts=(r.text||'').trim();if(facts==='(no matching memory)')facts=''}catch(_){}
+   const text=['[Offline / network unavailable — '+reason+']','Local memory related to "'+q+'":',facts||'(no matching local facts)'].join('\n');
+   return{text,data:{answer:null,results:[],prov:'offline-memory',offline:true,reason}};
+ }
+ if(!searchReady())return offlineFallback('web search not configured');
+ try{
+   const x=await httpx(p.req(q,n,s));
+   if(x.status>=400)throw Error(`${p.n} returned HTTP ${x.status}: ${x.body.slice(0,140)}`);
+   let j=null;try{j=J.parse(x.body)}catch{}const o=j?p.norm(j):{results:[],raw:x.body.slice(0,1500)};const rs=o.results.filter(r=>r.u).slice(0,n);
+   const text=[o.answer?'Answer: '+String(o.answer).slice(0,600):'',...rs.map((r,i)=>`${i+1}. ${r.t||r.u}\n${r.u}\n${String(r.c||'').slice(0,300)}`),!rs.length&&o.raw?o.raw:'',!rs.length&&!o.raw?'No results.':''].filter(Boolean).join('\n\n');
+   return{text,data:{answer:o.answer&&String(o.answer).slice(0,600),results:rs.map(r=>({t:r.t,u:r.u,c:String(r.c||'').slice(0,200)})),prov:p.n}};
+ }catch(e){
+   const msg=String(e.message||e);
+   if(/network|failed to fetch|timeout|offline|DNS|unreachable|HTTP 0/i.test(msg)||!navigator.onLine)return offlineFallback(msg.slice(0,80));
+   throw e;
+ }
+}
 
 /* ---------- tool cards ---------- */
 const arr=x=>[].concat(x==null?[]:x).filter(v=>v!==''),base=p=>String(p||'').replace(/\/+$/,'').split('/').pop()||'/';
@@ -655,7 +780,7 @@ function bodyHTML(k){const a=k.args||{},d=k.data||{};let h='';
  else if(d.entries){const L=d.entries.slice(0,40);h=`<div class="lst">${L.map(e=>`<div class="ln">${ic(e.d?'folder':'file')}<span>${esc(d.full?e.p:e.n)}${e.d?'/':''}</span>${e.d?'':`<i>${fmt(e.s)}</i>`}</div>`).join('')}</div>`+(d.entries.length>40||d.more?`<div class="note">+ more not shown here</div>`:'')}
  else if(d.results){h=(d.answer?`<div class="ans">${esc(d.answer)}</div>`:'')+d.results.map(r=>{let dm='';try{dm=new URL(r.u).hostname.replace(/^www\./,'')}catch{}return`<a class="sr" href="${ea(r.u)}" target="_blank" rel="noopener"><s>${esc((dm||'?')[0].toUpperCase())}</s><div><b>${esc(r.t||dm)}</b><small>${esc(dm)}</small><p>${esc(r.c||'')}</p></div></a>`}).join('')}
  else if(k.name==='read_file'&&k.res)h='<pre>'+esc(k.res)+'</pre>';
- else if(k.name==='write_file')h='<div class="ln">'+ic('file')+'<span>'+esc(a.path||'')+'</span><i>'+fmt((a.content||'').length)+'</i></div>';
+ else if(k.name==='write_file'){h='<div class="ln">'+ic('file')+'<span>'+esc(a.path||'')+'</span><i>'+fmt((a.content||'').length)+'</i></div>';if(a.content)h+='<pre style="max-height:120px">'+esc(String(a.content).slice(0,600))+(String(a.content).length>600?'…':'')+'</pre>';}
  else if(k.name==='edit_file'){h='<div class="ln">'+ic('file')+'<span>'+esc(a.path||'')+'</span></div>';
   try{h+=renderDiffHtml(myersDiff(a.search||'',a.replace||''))}catch(_){h+='<pre>Search: '+esc((a.search||'').slice(0,120))+'\nReplace: '+esc((a.replace||'').slice(0,120))+'</pre>'}}
  else if(k.name==='save_fact')h='<div class="ans"><b>['+esc(a.tag||'NOTE')+']</b> '+esc(a.content||'')+'</div>';
@@ -676,8 +801,73 @@ function callsHTML(m){const L=m.calls||[];if(!L.length)return'';let h='';
 
 /* ---------- rendering ---------- */
 function turnHTML(){return`<div class="tho" hidden><button class="tho-b" data-th>${I.bulb}<span>Thought</span>${I.chev}</button><div class="tho-t"></div></div><div class="md"></div><div class="calls"></div>`}
+function updateCallsInPlace(container, m){
+  const L = m.calls || [];
+  if (!L.length) { container.innerHTML = ''; return; }
+  // Build batch header if needed
+  const asks = L.filter(k=>k.state==='ask').length, done = L.filter(k=>['ok','err','denied','skip'].includes(k.state)).length;
+  let batch = container.querySelector('.batch');
+  if (L.length > 1) {
+    const html = asks
+      ? `<span><b>${L.length} actions</b> · ${asks} need approval</span><span class="sp"></span><button data-noall>Deny all</button><button class="go" data-okall>Approve all</button>`
+      : `<span><b>${L.length} actions</b> · ${done} of ${L.length} done</span>`;
+    if (!batch) {
+      batch = document.createElement('div');
+      batch.className = 'batch';
+      container.insertBefore(batch, container.firstChild);
+    }
+    batch.innerHTML = html;
+  } else if (batch) {
+    batch.remove();
+  }
+  const existing = new Map();
+  container.querySelectorAll('.tc[data-id]').forEach(el => existing.set(el.getAttribute('data-id'), el));
+  const keep = new Set();
+  L.forEach(k => {
+    keep.add(k.id);
+    let el = existing.get(k.id);
+    const T = TT[k.name]||{i:'file',s:()=>''}, st = k.state;
+    const wantCls = ['tc', st, shown.has(k.id)?'':'ent', shown.get(k.id)!==st?'fx':'', openSet.has(k.id)?'open':'', k.name==='delete'?'dng':''].filter(Boolean).join(' ');
+    const sum = T.s ? T.s(k.args||{},k) : '';
+    const titleTxt = title(k);
+    if (!el) {
+      // First time: create full card (animation starts once)
+      const wrap = document.createElement('div');
+      wrap.innerHTML = cardHTML(k);
+      el = wrap.firstElementChild;
+      container.appendChild(el);
+    } else {
+      // Update in place — do NOT replace the element so CSS animations keep running
+      el.className = wantCls;
+      const b = el.querySelector('.tc-t b');
+      if (b && b.textContent !== titleTxt) b.textContent = titleTxt;
+      const sm = el.querySelector('.tc-t small');
+      if (sm && sm.textContent !== sum) sm.textContent = sum;
+      const si = el.querySelector('.tc-s');
+      if (si) si.innerHTML = SI[st] || '';
+      const body = el.querySelector('.tc-in');
+      if (body) body.innerHTML = bodyHTML(k);
+      // Approval buttons
+      let acts = el.querySelector('.tc-a');
+      if (st === 'ask') {
+        if (!acts) {
+          const div = document.createElement('div');
+          div.className = 'tc-a';
+          div.innerHTML = `<button data-no="${ea(k.id)}">Deny</button><button class="go" data-ok="${ea(k.id)}">${k.name==='delete'&&k.args&&k.args.permanent?'Delete forever':'Allow'}</button>`;
+          el.querySelector('.tc-b > div').appendChild(div);
+        }
+      } else if (acts) {
+        acts.remove();
+      }
+    }
+    shown.set(k.id, st);
+  });
+  // Remove cards that are gone
+  existing.forEach((el, id) => { if (!keep.has(id)) el.remove(); });
+}
 function paint(d,m,last,i){const tho=d.querySelector('.tho'),th=cfg.thoughts&&m.thought;tho.hidden=!th;if(th){const t=tho.querySelector('.tho-t');t.textContent=m.thought;tho.classList.toggle('open',thOpen.has(cid+':'+i))}
- d.querySelector('.md').innerHTML=(busy&&last&&!m.content&&!(m.calls&&m.calls.length))?THINK:m.content?md(m.content):'';d.querySelector('.calls').innerHTML=callsHTML(m)}
+ d.querySelector('.md').innerHTML=(busy&&last&&!m.content&&!(m.calls&&m.calls.length))?THINK:m.content?md(m.content):'';
+ updateCallsInPlace(d.querySelector('.calls'), m)}
 function render(){const c=cur(),th=$('#th');th.innerHTML='';
  if(c&&!primed.has(c.id)){c.messages.forEach(m=>(m.calls||[]).forEach(k=>shown.set(k.id,k.state)));primed.add(c.id)}
  if(!c||!c.messages.length)th.innerHTML=`<div class="hero">${BLOOM}<h1>What's on your mind?</h1><p>Private, on-device, offline.</p><div class="chips">${SUG.map(s=>`<button class="chip">${s}</button>`).join('')}</div></div>`;
@@ -690,7 +880,7 @@ function render(){const c=cur(),th=$('#th');th.innerHTML='';
    else if(!(busy&&last)&&m.content)d.insertAdjacentHTML('beforeend',`<div class="acts"><button class="ib" data-cp aria-label="Copy" title="Copy">${I.copy}</button><button class="ib" data-dl aria-label="Download Markdown" title="Download .md">${I.dl}</button>${last?`<button class="ib" data-retry aria-label="Regenerate">${I.redo}</button>`:''}</div>`)}
   th.appendChild(d)});
  hist();sc()}
-function refresh(a){const c=cur(),i=c.messages.indexOf(a),d=$('#th').children[i];if(d){d.querySelector('.calls').innerHTML=callsHTML(a);sc()}}
+function refresh(a){const c=cur(),i=c.messages.indexOf(a),d=$('#th').children[i];if(d){updateCallsInPlace(d.querySelector('.calls'), a);sc()}}
 function hist(){$('#hist').innerHTML=chats.map(c=>`<div class="row${c.id===cid?' sel':''}" data-id="${c.id}"><span>${esc(c.title||'New chat')}</span><button class="del" data-del aria-label="Delete">${I.x}</button></div>`).join('')||'<div class="label" style="margin:8px 10px">No chats yet</div>'}
 const sc=()=>{const s=$('#sc');s.scrollTop=s.scrollHeight};
 function setBusy(b){busy=b;const g=$('#go');g.innerHTML=b?I.stop:I.up;g.disabled=!b&&!$('#in').value.trim();g.setAttribute('aria-label',b?'Stop':'Send')}
@@ -776,6 +966,95 @@ function apiMsgs(c) {
   return out;
 }
 const safeParse=s=>{try{return J.parse(s||'{}')}catch{return null}};
+/** Repair common small-model / quantized tool-call argument failures (Gemma 3 1B, Llama-3.2-1B, Qwen tiny, etc.) */
+function repairToolArgs(raw){
+  if(raw==null) return null;
+  let s = String(raw).trim();
+  if(!s) return {};
+  // Strip markdown fences / prose preamble
+  s = s.replace(/^```(?:json|tool|javascript)?\s*/i,'').replace(/\s*```$/i,'').trim();
+  s = s.replace(/^(?:here(?:'s| is)|sure[,!]?\s+)?(?:the\s+)?(?:tool\s+call|function\s+call|json)\s*[:：]?\s*/i,'').trim();
+  let p = safeParse(s);
+  if(p && typeof p==='object') return p;
+  // Extract outermost {...}
+  const brace = s.match(/\{[\s\S]*\}/);
+  if(brace){
+    let cand = brace[0];
+    p = safeParse(cand);
+    if(p) return p;
+    // Fix trailing commas, single quotes, unescaped newlines inside strings (best-effort)
+    cand = cand.replace(/,\s*([}\]])/g,'$1');
+    cand = cand.replace(/'/g,'"');
+    cand = cand.replace(/"(?:[^"\\]|\\.)*"/g, m => m.replace(/\r?\n/g,'\\n').replace(/\t/g,'\\t'));
+    // Unquoted keys (simple identifiers)
+    cand = cand.replace(/([{,]\s*)([A-Za-z_][A-Za-z0-9_]*)\s*:/g,'$1"$2":');
+    p = safeParse(cand);
+    if(p) return p;
+  }
+  // XML-ish <parameter name="x">val</parameter> or <arg> mixed into JSON
+  if(/<parameter\s+name=/i.test(s) || /<\/?tool/i.test(s)){
+    const obj = {};
+    const re = /<parameter\s+name=["']?([^"'>]+)["']?\s*>([\s\S]*?)<\/parameter>/gi;
+    let m; while((m=re.exec(s))) obj[m[1]] = m[2].trim();
+    if(Object.keys(obj).length) return obj;
+  }
+  // Python-style name(arg=val, ...)
+  const py = s.match(/([A-Za-z_][\w.]*)\s*\((.*)\)\s*$/s);
+  if(py){
+    const obj = {};
+    const body = py[2];
+    // naive key=value split
+    body.split(/,(?=(?:[^"]*"[^"]*")*[^"]*$)/).forEach(part=>{
+      const kv = part.match(/^\s*([A-Za-z_]\w*)\s*=\s*(.+)\s*$/);
+      if(kv){
+        let v = kv[2].trim();
+        if((v.startsWith('"')&&v.endsWith('"'))||(v.startsWith("'")&&v.endsWith("'"))) v = v.slice(1,-1);
+        else if(/^(true|false|null)$/i.test(v)) v = JSON.parse(v.toLowerCase());
+        else if(/^-?\d+(\.\d+)?$/.test(v)) v = Number(v);
+        obj[kv[1]] = v;
+      }
+    });
+    if(Object.keys(obj).length) return obj;
+  }
+  return null;
+}
+/** If the model put a tool call in content (common on Gemma 3 / non-native templates), lift it. */
+function extractToolsFromContent(content){
+  if(!content||!content.trim()) return null;
+  const s = content.trim();
+  const calls = [];
+  // OpenAI-ish or Gemma JSON: {"name":"...","parameters":{...}} or {"name":"...","arguments":{...}}
+  const jsonRe = /\{\s*"name"\s*:\s*"([^"]+)"\s*,\s*"(?:parameters|arguments|args)"\s*:\s*(\{[\s\S]*?\})\s*\}/g;
+  let m;
+  while((m = jsonRe.exec(s))){
+    const args = repairToolArgs(m[2]) || safeParse(m[2]) || {};
+    calls.push({id:'call_'+Date.now().toString(36)+calls.length, name:m[1], args, state:'queued'});
+  }
+  if(calls.length) return calls;
+  // <tool_call> ... </tool_call> or call tool ...
+  const xmlRe = /<(?:tool_call|function_call|tool)\s*(?:name=["']([^"']+)["'])?[^>]*>([\s\S]*?)<\/(?:tool_call|function_call|tool)>/gi;
+  while((m = xmlRe.exec(s))){
+    let name = m[1], body = m[2].trim();
+    let args = repairToolArgs(body);
+    if(!args && body.startsWith('{')) args = safeParse(body);
+    if(!name){
+      const nm = body.match(/"name"\s*:\s*"([^"]+)"/);
+      if(nm) name = nm[1];
+    }
+    if(name) calls.push({id:'call_'+Date.now().toString(36)+calls.length, name, args:args||{}, state:'queued'});
+  }
+  if(calls.length) return calls;
+  // [func_name(param=val)] Gemma style
+  const br = s.match(/\[([A-Za-z_][\w.]*)\s*\(([\s\S]*?)\)\s*\]/);
+  if(br){
+    const args = repairToolArgs(br[0]) || {};
+    // re-parse the inside
+    const inner = repairToolArgs('{'+br[2].replace(/=/g,':')+'}') || {};
+    return [{id:'call_'+Date.now().toString(36), name:br[1], args: Object.keys(args).length?args:inner, state:'queued'}];
+  }
+  return null;
+}
+
 async function turn(c,a){ctrl=new AbortController();let raf=0;const acc=[],idx=c.messages.indexOf(a),el=$('#th').children[idx];
  const live=()=>{raf=0;if(el){paint(el,a,true,idx);sc()}};
  try{const body={stream:true,temperature:+cfg.t,max_tokens:+cfg.m,messages:apiMsgs(c),...reqParams()};const tl=tools();if(tl.length){body.tools=tl;body.tool_choice='auto'}
@@ -793,8 +1072,12 @@ async function turn(c,a){ctrl=new AbortController();let raf=0;const acc=[],idx=c
      if(ch&&!raf)raf=requestAnimationFrame(live)}catch{}}}
  }catch(e){if(e.name!=='AbortError')a.error=e.message||'Failed'}
  if(raf)cancelAnimationFrame(raf);ctrl=null;
- if(a.calls){a.calls=a.calls.filter(k=>k.name).map(k=>{const o=acc.find(x=>x&&x.id===k.id),p=o?safeParse(o.args):{};return p?{id:k.id,name:k.name,args:p,state:'queued'}:{id:k.id,name:k.name,args:{},state:'err',res:'Error: the arguments were not valid JSON.'}});if(!a.calls.length)delete a.calls}}
-function approve(id,ok){const g=gate.get(id);if(g)g.r(ok)}
+ if(a.calls){a.calls=a.calls.filter(k=>k.name).map(k=>{const o=acc.find(x=>x&&x.id===k.id);let p=o?repairToolArgs(o.args):null;if(p===null&&o)p=safeParse(o.args);return (p!==null)?{id:k.id,name:k.name,args:p||{},state:'queued'}:{id:k.id,name:k.name,args:{},state:'err',res:'Error: the arguments were not valid JSON (repair failed).'}});if(!a.calls.length)delete a.calls}
+ // Fallback: small models often emit tool calls as text instead of native tool_calls
+ if((!a.calls||!a.calls.length)&&a.content){const lifted=extractToolsFromContent(a.content);if(lifted&&lifted.length){a.calls=lifted;a.content=a.content.replace(/```[\s\S]*?```/g,'').replace(/<(?:tool_call|function_call|tool)[\s\S]*?<\/(?:tool_call|function_call|tool)>/gi,'').trim();}}
+}
+function approve(id,ok){const g=gate.get(id);if(g)g.r(ok);
+  if(ok){const c=cur();const a=c&&c.messages.at(-1);const k=a&&(a.calls||[]).find(x=>x.id===id);if(k&&ASK.has(k.name))Cap.remember(k)}}
 
 /* ---------- GitHub REST Suite ---------- */
 const GHT = [
@@ -984,17 +1267,24 @@ async function execCustomTool(tool, args){
 }
 
 async function runTool(k){
-  if(k.name==='web_search')return webSearch(k.args.query,k.args.max_results);
-  if(k.name.startsWith('gh_'))return ghTool(k.name,k.args);
-  if(k.name==='forge_tool')return forgeCustomTool(k.args);
-  if(k.name==='list_forged_tools')return listCustomTools();
-  if(k.name==='delete_forged_tool')return deleteCustomTool(k.args);
-  const ct=(typeof customTools!=="undefined")&&customTools.find(t=>t.name===k.name);
-  if(ct)return await execCustomTool(ct,k.args);
-  return J.parse(await nat(k.name,k.args));
+  const cached=Cap.getCached(k.name,k.args);
+  if(cached)return{...cached,_cached:true};
+  let out;
+  if(k.name==='web_search')out=await webSearch(k.args.query,k.args.max_results);
+  else if(k.name.startsWith('gh_'))out=await ghTool(k.name,k.args);
+  else if(k.name==='forge_tool')out=await forgeCustomTool(k.args);
+  else if(k.name==='list_forged_tools')out=await listCustomTools();
+  else if(k.name==='delete_forged_tool')out=await deleteCustomTool(k.args);
+  else {
+    const ct=(typeof customTools!=="undefined")&&customTools.find(t=>t.name===k.name);
+    if(ct)out=await execCustomTool(ct,k.args);
+    else out=J.parse(await nat(k.name,k.args));
+  }
+  Cap.setCached(k.name,k.args,out);
+  return out;
 }
 async function execCalls(a){const L=a.calls;
- for(const k of L){if(k.state==='err')continue;k.state=cfg.ask&&ASK.has(k.name)?'ask':'queued';if(k.state==='ask'){let r;const p=new Promise(x=>r=x);gate.set(k.id,{p,r})}}
+ for(const k of L){if(k.state==='err')continue;k.state=(cfg.ask&&ASK.has(k.name)&&!Cap.isRemembered(k))?'ask':'queued';if(k.state==='ask'){let r;const p=new Promise(x=>r=x);gate.set(k.id,{p,r})}}
  refresh(a);
  for(const k of L){
   if(k.state==='err')continue;
@@ -1022,7 +1312,14 @@ async function run(c){setBusy(true);stopped=false;let steps=0;
   const userText=lastUser?lastUser.content:'';
   Task.begin(userText);
   Continuity.begin();
-  _sysMem=await sysFullWithMemory(Task.isCont(userText)&&Task.st().goal?Task.st().goal:userText);
+  const prof=await Cap.applyProfile();
+  let memQuery=Task.isCont(userText)&&Task.st().goal?Task.st().goal:userText;
+  _sysMem=await sysFullWithMemory(memQuery);
+  if(prof.note)_sysMem+=('\n\n## Device note\n'+prof.note);
+  // Auto-coder routing: if coding intent and coder model installed, soft-swap
+  if(Cap.codingIntent(userText)&&NI&&NI.coder_model&&NI.active_slot!=='coder'){
+    try{await nat('swap_model',{slot:'coder'});ninfo();}catch(_){}
+  }
   for(;;){const a=c.messages.at(-1);a.error='';a.content=a.content||'';render();
    await turn(c,a);if(stopped){delete a.calls;break}if(a.error||!a.calls||!a.calls.length)break;
    await execCalls(a);if(stopped)break;
@@ -1195,6 +1492,35 @@ function paneTools(){return`<div class="pane" data-p="tool"><div class="sec">Pho
  </div>
  <div class="tst" id="vit-m" style="white-space:pre-wrap;font-family:var(--mono);font-size:12px;margin-top:6px"></div>
 
+ <div class="sec">Main Chat Model</div>
+<div class="set"><div class="lt"><span id="main-st">Chat Model</span><small id="main-s">tap to switch .gguf (no data wipe)</small></div><button class="btn sm" id="main-pick">Switch model</button></div>
+<div class="note" style="margin:4px 0 8px">Switching keeps chats, memory and settings. If the file lives on shared storage we use it in-place (no multi-GB copy).</div>
+<div class="r2" style="margin-top:4px;gap:8px">
+  <button class="btn sm dng" id="main-del" style="display:none">Remove Model</button>
+</div>
+<div class="tst" id="main-m"></div>
+
+ <div class="sec">Active Project</div>
+ <div class="fi"><label>Project name</label><input class="in" id="proj-name" placeholder="e.g. Kojot Android" value=""></div>
+ <div class="fi" style="margin-top:6px"><label>Conventions <span style="color:var(--fg-3);font-weight:400">(injected every turn)</span></label>
+  <textarea class="in" id="proj-conv" rows="3" placeholder="Kotlin style, package layout, test commands…"></textarea></div>
+ <div class="r2" style="margin-top:6px"><button class="btn sm" id="proj-save">Save project</button></div>
+ <div class="tst" id="proj-m"></div>
+
+ <div class="sec">Agent depth</div>
+ <div class="set"><div class="lt"><span>Performance profile</span><small id="prof-s">balanced · respects thermals & battery</small></div></div>
+ <div class="set"><div class="seg" id="prof-seg">
+  <button data-prof="efficiency">Efficiency</button>
+  <button data-prof="balanced">Balanced</button>
+  <button data-prof="max">Max</button>
+ </div></div>
+ ${sw('auto_coder','Auto-route coding intent','Prefer coder model cues when the user asks about code')}
+ ${sw('tool_cache','Tool result cache','Reuse recent read-only tool results for 5 minutes')}
+ <div class="r2" style="margin-top:8px">
+  <button class="btn sm" id="allow-clear">Clear approval memory</button>
+ </div>
+ <div class="tst" id="agent-depth-m"></div>
+
  <div class="sec">Coder Engine (Monaco)</div>
 <div class="set"><div class="lt"><span id="coder-st">Specialized Coding Model</span><small id="coder-s">tap to select .gguf</small></div><button class="btn sm" id="coder-pick">Choose .gguf</button></div>
 <div class="fi" style="margin-top:8px">
@@ -1249,7 +1575,11 @@ function fillPower(){
   });
 }
 function tabsHTML(){return[['gen','General'],['tool','Tools'],...(cfg.power?[['pow','Power']]:[])].map(([k,n])=>`<button data-tab="${k}" class="${k===curTab?'on':''}">${n}</button>`).join('')}
-function buildSettings(){$('#s-body').innerHTML=paneGen()+paneTools()+powerHTML();fill();showTab(curTab);$('#s-tabs').innerHTML=tabsHTML()}
+function buildSettings(){$('#s-body').innerHTML=paneGen()+paneTools()+powerHTML();fill();showTab(curTab);$('#s-tabs').innerHTML=tabsHTML();
+  if($('#proj-name'))$('#proj-name').value=(cfg.project&&cfg.project.name)||'';
+  if($('#proj-conv'))$('#proj-conv').value=(cfg.project&&cfg.project.conventions)||'';
+  document.querySelectorAll('#prof-seg [data-prof]').forEach(x=>x.classList.toggle('on',x.dataset.prof===(cfg.profile||'balanced')));
+}
 function showTab(t){if(t==='pow'&&!cfg.power)t='gen';curTab=t;document.querySelectorAll('#s-body .pane').forEach(p=>p.classList.toggle('on',p.dataset.p===t));document.querySelectorAll('#s-tabs button').forEach(b=>b.classList.toggle('on',b.dataset.tab===t));$('#s-body').scrollTop=0}
 function fill(){document.querySelectorAll('#s-body [data-k]').forEach(e=>{const v=getPath(cfg,e.dataset.k);e.value=v==null?'':String(v)});document.querySelectorAll('#s-body [data-sw]').forEach(b=>b.setAttribute('aria-checked',!!getPath(cfg,b.dataset.sw)));segs();lab();provVis();filesUI()}
 const segs=()=>document.querySelectorAll('#s-body [data-seg]').forEach(s=>{const v=getPath(cfg,s.dataset.seg);s.querySelectorAll('button').forEach(b=>b.classList.toggle('on',b.dataset.v===v))});
@@ -1309,6 +1639,20 @@ if(!$('#fs-t'))return;ninfo();const ok=NI&&NI.files;$('#fs-t').textContent=!NI?'
     const cleanM = NI.model_name.replace(/\.gguf$/i, '').slice(0, 24);
     $('#ttl').textContent = cleanM;
   }
+  if ($('#main-s')) {
+    if (NI && NI.model_present) {
+      const nm = (NI.model_name || 'model').replace(/\.gguf$/i,'');
+      $('#main-st').textContent = nm.slice(0, 28);
+      $('#main-st').style.color = 'var(--cyan)';
+      $('#main-s').textContent = (NI.model_external ? 'External (no copy) · ' : 'Local copy · ') + (NI.model_path || '').split('/').pop();
+      if ($('#main-del')) $('#main-del').style.display = 'inline-block';
+    } else {
+      $('#main-st').textContent = 'Chat Model';
+      $('#main-st').style.color = 'var(--fg)';
+      $('#main-s').textContent = 'Not installed — tap Switch model';
+      if ($('#main-del')) $('#main-del').style.display = 'none';
+    }
+  }
   ninfo();
   if (NI && NI.coder_model) {
     $('#coder-s').textContent = 'Installed · Ready for Monaco';
@@ -1326,7 +1670,9 @@ if(!$('#fs-t'))return;ninfo();const ok=NI&&NI.files;$('#fs-t').textContent=!NI?'
 }
 function sheet(o){
   setTimeout(syncBack, 10);$('#ss').classList.toggle('open',o);if(o){drawer(false);ninfo();buildSettings()}}
-function done(){saveCfg();sheet(false);ping();syncVisionUI();}
+function done(){saveCfg();sheet(false);ping();syncVisionUI();
+try{Cap.offerResume()}catch(_){}
+}
 $('#s-body').addEventListener('input',e=>{const el=e.target.closest('[data-k]');if(!el)return;const t=el.dataset.t,key=el.dataset.k;let v=el.value;
  if(t==='num'||t==='int'||t==='sel'){v=v===''?undefined:+v;if(Number.isNaN(v))v=undefined}else if(t==='tf')v=v===''?undefined:v==='true';else if(v===''&&/^(p|srv)\./.test(key))v=undefined;
  if(key==='search.max'&&v!==undefined)v=Math.max(1,Math.min(10,v));let effKey = key;
@@ -1415,6 +1761,30 @@ $('#s-body').addEventListener('click',async e=>{const t=e.target;let b;
    filesUI();
    return;
  }
+ if(t.closest('#main-pick')){
+   try{ await nat('pick_model', {}); ninfo(); }catch(x){ alert(x.message); }
+   return}
+ if(t.closest('#main-del')){
+   if(!confirm('Remove the main chat model file? Chats, memory and settings are kept. You can pick another model afterwards.')) return;
+   try{ await nat('delete_model',{}); ninfo(); alert('Main model removed. Pick a new one to continue.'); }catch(x){ alert(x.message); }
+   return}
+ if(t.closest('#proj-save')){
+   cfg.project=cfg.project||{};
+   cfg.project.name=($('#proj-name')?.value||'').trim();
+   cfg.project.conventions=($('#proj-conv')?.value||'').trim();
+   saveCfg();
+   const m=$('#proj-m');if(m){m.style.color='var(--success)';m.textContent=cfg.project.name?'Project "'+cfg.project.name+'" saved.':'Project cleared.';}
+   return}
+ if(t.closest('#allow-clear')){
+   Cap.clearAllow();
+   const m=$('#agent-depth-m');if(m){m.style.color='var(--success)';m.textContent='Approval memory cleared.';}
+   return}
+ if(t.closest('#prof-seg [data-prof]')){
+   const b=t.closest('[data-prof]');
+   cfg.profile=b.dataset.prof;saveCfg();
+   document.querySelectorAll('#prof-seg [data-prof]').forEach(x=>x.classList.toggle('on',x.dataset.prof===cfg.profile));
+   const m=$('#agent-depth-m');if(m){m.style.color='var(--fg-2)';m.textContent='Profile: '+cfg.profile;}
+   return}
  if(t.closest('#coder-pick')){
    try{ await nat('pick_coder', {}); }catch(x){ alert(x.message); }
    return;
@@ -1765,7 +2135,39 @@ Rules: 1. search must be EXACT unique copy from buffer. 2. Empty buffer: search 
   let raw='';
   try{
     const base=(cfg.url||'http://127.0.0.1:8080').replace(/\/$/,'');
-    const res=await fetch(base+'/v1/chat/completions',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({model:'local',messages,max_tokens:edBackup.trim()?1200:4096,temperature:0.1})});
+    // Constrain decode with JSON Schema (llama-server converts to GBNF). Makes malformed output
+    // physically hard so the heal round is almost never needed on small local models.
+    const editSchema = {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        search: { type: "string" },
+        replace: { type: "string" },
+        edits: {
+          type: "array",
+          items: {
+            type: "object",
+            additionalProperties: false,
+            properties: {
+              search: { type: "string" },
+              replace: { type: "string" }
+            },
+            required: ["search", "replace"]
+          }
+        }
+      }
+    };
+    const body = {
+      model: "local",
+      messages,
+      max_tokens: edBackup.trim() ? 1200 : 4096,
+      temperature: 0.1,
+      response_format: {
+        type: "json_schema",
+        json_schema: { name: "code_edit", strict: true, schema: editSchema }
+      }
+    };
+    const res=await fetch(base+'/v1/chat/completions',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
     if(!res.ok)throw new Error(`HTTP ${res.status}: ${(await res.text()).slice(0,120)}`);
     const data=await res.json();
     if(data.error)throw new Error(typeof data.error==='string'?data.error:(data.error.message||'provider error'));

@@ -38,3 +38,36 @@ cd android && gradle assembleDebug
 
 - Main model: any `.gguf` (picked on first launch → `filesDir/model.gguf`)
 - Embeddings (optional): `nomic-embed-text` → `filesDir/nomic.gguf` (port 8081)
+
+## Recent patches (build-33+)
+
+- **No-copy models**: When the system can resolve a real filesystem path from the picked URI (common for Downloads / shared storage), the main model is used in-place. No multi-GB duplicate under `filesDir`.
+- **Hot-switch main model**: Settings → Main Chat Model → Switch model. Does not wipe chats, memory, or preferences (unlike clearing app data).
+- **Small-model tool-call repair**: Detects and rewrites common failure modes from quantized <7B models (Gemma 3 1B, Llama-3.2-1B, etc.): malformed JSON, trailing commas, XML/Python-style calls, preamble text, content-embedded tool calls. Low-latency local repair before the agent loop.
+- **Tool-card animation fix**: Running/prep cards update in-place so the spinner and shimmer no longer restart every frame.
+- **Process resilience (S26 Ultra / One UI)**: Longer partial wake-lock while the server is alive, one-shot battery-optimization exemption request, `largeHeap`, `singleTask`, hardware acceleration. Reduces Android process kills during long agent runs.
+
+## Capability depth (this build)
+
+- **Resume agent runs** — Interrupted tasks snapshot to `lc.resume`; hero shows Resume/Dismiss (6h TTL).
+- **Tool result cache** — Read-only tools (`list_dir`, `read_file`, memory, …) cached 5 minutes (toggle in Settings).
+- **Project mode** — Name + conventions injected every turn via Settings → Active Project.
+- **Approval memory** — Approved destructive tool patterns remembered (Clear in Agent depth).
+- **Performance profile** — Efficiency / Balanced / Max; soft thermal & battery notes injected when hot or low battery.
+- **Auto-coder routing** — Coding-intent messages soft-swap to coder model when installed.
+- **Offline web fallback** — `web_search` falls back to local memory recall when network/API fails.
+- **Diff-first write_file** — Content preview on write cards; edit_file keeps Myers diff.
+- **Monaco constrained JSON** — `response_format` json_schema on AI edit path.
+- **Small-model tool repair** — Malformed / XML / Python-style tool args repaired locally.
+
+## Foreground service (model process)
+
+`LlamaService` is a sticky foreground service that owns `llama-server` (port 8080)
+and the embedding server (port 8081). The Activity binds to it for control (start /
+restart / swap) but **does not kill** the servers on `onDestroy`, so agent runs
+survive leaving the app or system reclaiming the Activity.
+
+- Notification channel: "Kojot model server" (low importance, ongoing)
+- Action on notification: Stop
+- FGS type: `specialUse` (on-device LLM inference)
+- Partial wake-lock held while the service is running
