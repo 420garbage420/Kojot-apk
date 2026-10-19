@@ -405,9 +405,14 @@ textarea.in{height:auto;min-height:64px;padding:9px 12px;font:13px/19px var(--mo
 </div></div>
 <script>
 const $=s=>document.querySelector(s),LS=localStorage,J=JSON;
-const DEF={url:'http://127.0.0.1:8080',sys:'You are a helpful, concise assistant.',t:.7,m:1024,theme:'auto',power:false,thoughts:true,vision:false,coder_t:0.1,p_coder:{},srv_coder:{},files:true,ask:true,github:{token:'',repo:'420garbage420/kojot'},search:{on:true,prov:'tavily',keys:{},max:5,depth:'basic',sx:'',cu:'',cm:'GET',ch:'',cb:''},p:{},srv:{},xj:''};
+const DEF={url:'http://127.0.0.1:8080',sys:'You are a helpful, concise assistant.',t:.7,m:1024,theme:'auto',power:false,thoughts:true,vision:false,coder_t:0.1,p_coder:{},srv_coder:{},xj_coder:'',files:true,ask:true,github:{token:'',repo:'420garbage420/kojot'},search:{on:true,prov:'tavily',keys:{},max:5,depth:'basic',sx:'',cu:'',cm:'GET',ch:'',cb:''},p:{},srv:{},xj:''};
 const saved=(()=>{try{return J.parse(LS.getItem('lc.cfg')||'{}')}catch{return{}}})();
 const cfg={...DEF,...saved,search:{...DEF.search,...saved.search,keys:{...(saved.search||{}).keys}},p:{...saved.p},srv:{...saved.srv}};
+if(cfg.xj && (cfg.xj.includes('enable_thinking') || cfg.xj.includes('qwen')) && !cfg.xj_coder){
+  cfg.xj_coder = cfg.xj;
+  cfg.xj = '';
+  saveCfg();
+}
 let chats=(()=>{try{return J.parse(LS.getItem('lc.chats')||'[]')}catch{return[]}})(),cid=LS.getItem('lc.cur')||null,busy=false,ctrl=null,stopped=false,NI;
 chats.forEach(c=>{c.messages.forEach(m=>(m.calls||[]).forEach(k=>{if(!['ok','err','denied','skip'].includes(k.state)){k.state='skip';k.res=k.res||'Interrupted.'}}));
  for(let m;(m=c.messages.at(-1))&&m.role==='assistant'&&!m.content&&!m.error&&!(m.calls&&m.calls.length);)c.messages.pop()});
@@ -591,8 +596,20 @@ function setBusy(b){busy=b;const g=$('#go');g.innerHTML=b?I.stop:I.up;g.disabled
 function fresh(){const c={id:'c'+Date.now(),title:'',messages:[]};chats.unshift(c);cid=c.id;return c}
 
 /* ---------- model loop ---------- */
-function reqParams(){const p=cfg.p||{},o={};for(const[k,v]of Object.entries(p)){if(v===''||v==null)continue;if(k==='stop'){const s=String(v).split('\n').map(x=>x.trim()).filter(Boolean);if(s.length)o.stop=s}else if(k==='samplers'){const s=String(v).split(/[;,\s]+/).filter(Boolean);if(s.length)o.samplers=s}else if(k==='logit_bias'){try{o.logit_bias=J.parse(v)}catch{}}else o[k]=v}
- if(cfg.xj){try{Object.assign(o,J.parse(cfg.xj))}catch{}}return o}
+function reqParams(){
+  const isC = (NI && NI.active_slot === 'coder');
+  const p = (isC ? cfg.p_coder : cfg.p) || {}, o = {};
+  for(const[k,v] of Object.entries(p)){
+    if(v===''||v==null)continue;
+    if(k==='stop'){const s=String(v).split('\n').map(x=>x.trim()).filter(Boolean);if(s.length)o.stop=s}
+    else if(k==='samplers'){const s=String(v).split(/[;,\s]+/).filter(Boolean);if(s.length)o.samplers=s}
+    else if(k==='logit_bias'){try{o.logit_bias=J.parse(v)}catch{}}
+    else o[k]=v;
+  }
+  const rawX = isC ? (cfg.xj_coder || '') : (cfg.xj || '');
+  if(rawX){try{Object.assign(o,J.parse(rawX))}catch{}}
+  return o;
+}
 function condenseTool(k) {
   if (k.state === "err") return "[Error: " + String(k.res || "failed").slice(0, 100) + "]";
   if (k.state === "denied" || k.state === "skip") return "[Declined/Skipped]";
@@ -1121,6 +1138,7 @@ function fillPower(){
     let k = e.dataset.k;
     if(k.startsWith('p.')) k = 'p' + prefix + k.slice(1);
     else if(k.startsWith('srv.')) k = 'srv' + prefix + k.slice(3);
+    else if(k === 'xj') k = 'xj' + prefix;
     const v = getPath(cfg, k);
     e.value = v == null ? '' : String(v);
   });
@@ -1210,6 +1228,7 @@ $('#s-body').addEventListener('input',e=>{const el=e.target.closest('[data-k]');
  if(powTarget==='coder' && el.closest('.pane[data-p=pow]')){
   if(key.startsWith('p.')) effKey = 'p_coder' + key.slice(1);
   else if(key.startsWith('srv.')) effKey = 'srv_coder' + key.slice(3);
+  else if(key === 'xj') effKey = 'xj_coder';
  }
  setPath(cfg,effKey,v);if(key==='t'||key==='m')lab();saveCfg()});
 $('#s-body').addEventListener('click',async e=>{const t=e.target;let b;
@@ -1371,7 +1390,7 @@ $('#s-body').addEventListener('click',async e=>{const t=e.target;let b;
  if(t.closest('#ws-test')){const m=$('#ws-m');m.style.color='var(--fg-2)';m.textContent='Searching…';try{const r=await webSearch('latest news',3);m.style.color='var(--success)';m.textContent=`Works — ${r.data.results.length} results via ${r.data.prov}.`}catch(x){m.style.color='var(--danger)';m.textContent=x.message}return}
  if(t.closest('#p-info')){const m=$('#srvinfo');m.textContent='Reading…';try{const p=await(await fetch(cfg.url.replace(/\/$/,'')+'/props')).json(),g=p.default_generation_settings||{};m.style.color='var(--fg-2)';m.textContent=`ctx ${g.n_ctx||'?'} · slots ${p.total_slots||'?'} · ${(p.model_path||'').split('/').pop()||'model'} · ${p.build_info||''}`}catch{m.style.color='var(--danger)';m.textContent='Could not read /props.'}return}
  if(t.closest('#p-apply')){saveCfg();try{await nat('restart',{srv:cfg.srv});done()}catch(x){$('#srvinfo').style.color='var(--danger)';$('#srvinfo').textContent=x.message}return}
- if(t.closest('#p-reset')){cfg.p={};cfg.srv={};cfg.xj='';saveCfg();fill()}});
+ if(t.closest('#p-reset')){if(powTarget==='coder'){cfg.p_coder={};cfg.srv_coder={};cfg.xj_coder='';}else{cfg.p={};cfg.srv={};cfg.xj='';}saveCfg();fillPower();}});
 async function setRoot(p){const m=$('#rt-m');try{await nat('setroot',{path:p});ninfo();filesUI();m.style.color='var(--success)';m.textContent='Workspace set.'}catch(x){m.style.color='var(--danger)';m.textContent=x.message}}
 $('#s-tabs').addEventListener('click',e=>{const b=e.target.closest('[data-tab]');if(b)showTab(b.dataset.tab)});
 
