@@ -1829,17 +1829,30 @@ const PDF = {
   },
 
   async loadScript(src){
-    if(document.querySelector('script[data-pdfsrc="'+src+'"]')) {
-      // already requested — wait until global appears for known libs
-      return;
+    if(document.querySelector('script[data-pdfsrc="'+src+'"]')) return;
+    // Monaco registers AMD define(); UMD builds (pdf-lib, pdf.js) then skip window globals.
+    const hadDefine = typeof window.define==='function';
+    const prevDefine = window.define;
+    const hadModule = typeof window.module!=='undefined';
+    const prevModule = window.module;
+    const hadExports = typeof window.exports!=='undefined';
+    const prevExports = window.exports;
+    try{
+      try{ window.define=undefined; }catch(_){}
+      try{ window.module=undefined; }catch(_){}
+      try{ window.exports=undefined; }catch(_){}
+      await new Promise((res,rej)=>{
+        const s=document.createElement('script');
+        s.src=src; s.async=false; s.dataset.pdfsrc=src;
+        s.onload=()=>res();
+        s.onerror=()=>rej(Error('Failed to load '+src));
+        document.head.appendChild(s);
+      });
+    }finally{
+      try{ if(hadDefine) window.define=prevDefine; else delete window.define; }catch(_){}
+      try{ if(hadModule) window.module=prevModule; else delete window.module; }catch(_){}
+      try{ if(hadExports) window.exports=prevExports; else delete window.exports; }catch(_){}
     }
-    await new Promise((res,rej)=>{
-      const s=document.createElement('script');
-      s.src=src; s.async=false; s.dataset.pdfsrc=src;
-      s.onload=()=>res();
-      s.onerror=()=>rej(Error('Failed to load '+src));
-      document.head.appendChild(s);
-    });
   },
 
   async ensureLibs(){
@@ -1895,11 +1908,13 @@ const PDF = {
         for(const u of cdns){ try{ await this.loadScript(u); last=null; break; }catch(e){ last=e; } }
         if(last) throw Error('pdf-lib failed to load. '+last.message);
       }
-      // UMD may need a tick
-      if(typeof PDFLib==='undefined' && typeof window!=='undefined'){
-        await new Promise(r=>setTimeout(r,50));
+      await new Promise(r=>setTimeout(r,30));
+      // Some builds expose differently; normalize
+      if(typeof PDFLib==='undefined'){
+        const alt = window.pdfLib || window['pdf-lib'] || (window.PDFLibLib);
+        if(alt) window.PDFLib = alt;
       }
-      if(typeof PDFLib==='undefined') throw Error('pdf-lib loaded but PDFLib is undefined');
+      if(typeof PDFLib==='undefined') throw Error('pdf-lib loaded but PDFLib is undefined (AMD conflict?)');
     }
     this.libsReady = true;
   },
@@ -2623,17 +2638,25 @@ function showEditor(on){
     ninfo();
     if (NI && NI.coder_model) {
       if (eng) { eng.textContent = 'Swapping to Coder…'; eng.style.color = 'var(--gold)'; }
-      nat('swap_model', { slot: 'coder' }).then(raw => {
-        try {
-          const r = JSON.parse(raw);
-          if (r.ok && eng) {
-  const clean = (NI?.coder_name || 'Coder').replace(/\.gguf$/i, '').slice(0, 16);
-  const cCtx = (NI?.srv_coder?.ctx || 32768) / 1024;
-  eng.textContent = clean + ' (' + cCtx + 'k)';
-  eng.style.color = 'var(--cyan)';
-}
-        } catch(_) {}
-      }).catch(() => { if (eng) { eng.textContent = 'Main Engine'; eng.style.color = 'var(--fg-3)'; } });
+      (async()=>{
+        const label=()=>{
+          if(!eng)return;
+          const clean=(NI?.coder_name||'Coder').replace(/\.gguf$/i,'').slice(0,16);
+          const cCtx=(NI?.srv_coder?.ctx||32768)/1024;
+          eng.textContent=clean+' ('+cCtx+'k)';
+          eng.style.color='var(--cyan)';
+        };
+        let ok=false;
+        for(let i=0;i<3 && !ok;i++){
+          try{
+            if(i) await new Promise(r=>setTimeout(r,800*i));
+            const raw=await nat('swap_model',{slot:'coder'});
+            const r=JSON.parse(raw);
+            if(r.ok){ ok=true; await ninfo(); label(); }
+          }catch(_){}
+        }
+        if(!ok && eng){ eng.textContent='Main Engine'; eng.style.color='var(--fg-3)'; }
+      })();
     } else if (eng) {
       eng.textContent = 'Main Engine'; eng.style.color = 'var(--fg-3)';
     }

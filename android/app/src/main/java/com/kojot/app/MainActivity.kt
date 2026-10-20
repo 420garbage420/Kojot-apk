@@ -339,8 +339,10 @@ class MainActivity : Activity() {
                         llama?.restartServers()
                         msg.text = if (web.visibility == View.VISIBLE) msg.text else "Embedding model installed."
                     } else if (r == REQ_CODER) {
-                        if (activeSlot == "coder") restartServer()
-                        msg.text = if (web.visibility == View.VISIBLE) msg.text else "Coder model installed."
+                        // Ensure service sees the new file; one restart is enough (no double-pick)
+                        if (llama != null) llama?.restartServers()
+                        else bindAndStartService()
+                        msg.text = if (web.visibility == View.VISIBLE) "Coder model installed." else "Coder model installed."
                     }
                 }
             } catch (e: Exception) {
@@ -370,23 +372,36 @@ class MainActivity : Activity() {
         }
     }
 
-    private fun swapModel(slot: String): JSONObject {
-        val svc = llama
-        if (svc == null) {
-            // Ensure service is up then swap
-            prepareWww()
-            bindAndStartService()
-            return JSONObject().put("ok", false).put("error", "Server starting — try swap again").put("slot", activeSlot)
+    private fun waitForService(timeoutMs: Long = 15000L): LlamaService? {
+        if (llama != null) return llama
+        prepareWww()
+        bindAndStartService()
+        val step = 200L
+        var waited = 0L
+        while (llama == null && waited < timeoutMs) {
+            try { Thread.sleep(step) } catch (_: InterruptedException) { break }
+            waited += step
         }
-        web.visibility = View.GONE
-        msg.visibility = View.VISIBLE
-        msg.text = "Switching model…"
+        return llama
+    }
+
+    private fun swapModel(slot: String): JSONObject {
+        val svc = waitForService()
+        if (svc == null) {
+            return JSONObject().put("ok", false).put("error", "Server not ready — open the app fully, then try again").put("slot", activeSlot)
+        }
+        runOnUiThread {
+            web.visibility = View.GONE
+            msg.visibility = View.VISIBLE
+            msg.text = "Switching model…"
+        }
         val result = svc.swapModel(slot)
         if (result.optBoolean("ok")) {
             runOnUiThread { showWeb() }
         } else {
+            // Don't leave user stuck on error screen — restore web so they can back out
             runOnUiThread {
-                msg.text = result.optString("error", "Swap failed")
+                showWeb()
             }
         }
         return result
