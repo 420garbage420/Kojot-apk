@@ -226,7 +226,7 @@ class LlamaService : Service() {
 
             val exe = File(applicationInfo.nativeLibraryDir, "libllama_server.so")
             startEmbedding(exe)
-            startOcr(exe)
+            // OCR server is lazy — started only when ocr_pdf/ocr_image needs it (avoids OOM)
 
             if (!modelFile().isFile && !(activeSlot == "coder" && coderModelFile().isFile)) {
                 notifyReady(false, "No model file")
@@ -319,18 +319,18 @@ class LlamaService : Service() {
         }
         try {
             val mmproj = findMmproj(ocr)
+            if (mmproj == null) {
+                // Without mmproj, image OCR cannot work — skip starting a second full model (OOM risk)
+                Log.i(TAG, "OCR model ${ocr.name} has no mmproj — not starting :8082 (use ML Kit)")
+                return
+            }
             val args = mutableListOf(
                 exe.path, "-m", ocr.path,
                 "--host", "127.0.0.1", "--port", "8082",
-                "-c", "4096", "-t", "4", "--jinja"
+                "-c", "2048", "-t", "2", "--jinja",
+                "--mmproj", mmproj.path
             )
-            if (mmproj != null) {
-                args.add("--mmproj")
-                args.add(mmproj.path)
-                Log.i(TAG, "OCR vision: ${ocr.name} + mmproj ${mmproj.name}")
-            } else {
-                Log.i(TAG, "OCR model ${ocr.name} without mmproj (vision needs mmproj; ML Kit remains primary)")
-            }
+            Log.i(TAG, "OCR vision: ${ocr.name} + mmproj ${mmproj.name}")
             val p = ProcessBuilder(args).redirectErrorStream(true).start()
             ocrProc = p
             thread { p.inputStream.bufferedReader().forEachLine { Log.d("llama-ocr", it) } }
@@ -355,9 +355,57 @@ class LlamaService : Service() {
     }
 
     fun restartOcr() {
-        thread {
-            val exe = File(applicationInfo.nativeLibraryDir, "libllama_server.so")
-            startOcr(exe)
+        thread { ensureOcr(timeoutMs = 45_000L) }
+    }
+
+    /** Stop OCR server to free RAM (e.g. before loading coder model). */
+    fun stopOcr() {
+        try {
+            ocrProc?.destroy()
+            try { ocrProc?.waitFor() } catch (_: Exception) {}
+        } catch (_: Exception) {}
+        ocrProc = null
+        ocrReady = false
+        Log.i(TAG, "OCR server stopped")
+    }
+
+    /**
+     * Start OCR server on demand and wait until healthy or timeout.
+     * Returns true if :8082 responds. Safe to call from a worker thread.
+     */
+    fun ensureOcr(timeoutMs: Long = 60_000L): Boolean {
+        if (ocrReady && ocrProc?.isAlive == true) {
+            if (probeOcr()) return true
+            ocrReady = false
+        }
+        val ocr = ocrModelFile()
+        if (!ocr.isFile) return false
+        val exe = File(applicationInfo.nativeLibraryDir, "libllama_server.so")
+        startOcr(exe)
+        val deadline = System.currentTimeMillis() + timeoutMs
+        while (System.currentTimeMillis() < deadline) {
+            if (ocrProc?.isAlive != true) {
+                Log.w(TAG, "OCR process died during ensure")
+                return false
+            }
+            if (probeOcr()) {
+                ocrReady = true
+                return true
+            }
+            try { Thread.sleep(400) } catch (_: Exception) {}
+        }
+        Log.w(TAG, "OCR ensure timed out")
+        return ocrReady
+    }
+
+    private fun probeOcr(): Boolean {
+        return try {
+            val c = URL("http://127.0.0.1:8082/health").openConnection() as HttpURLConnection
+            c.connectTimeout = 400
+            c.readTimeout = 400
+            c.responseCode == 200
+        } catch (_: Exception) {
+            false
         }
     }
 

@@ -90,3 +90,5 @@ survive leaving the app or system reclaiming the Activity.
 - **OCR layout reconstruction** — After OCR, line boxes are clustered into rows/columns; markdown tables and structured layout are cached on the PDF object and fed into AI Fill.
 
 - **Vision OCR runner (:8082)** — Binding an OCR GGUF starts a second llama-server. Place a matching `*mmproj*.gguf` beside the model for multimodal image OCR. PdfTools prefers vision text when the server is healthy, keeps ML Kit line boxes for layout, and falls back to ML Kit entirely if the server is down or mmproj is missing.
+
+- **Stability (editor / OOM)** — OCR GGUF no longer starts at boot. It starts on first `ocr_pdf`/`ocr_image` only when a matching mmproj exists, and is stopped when opening the code editor or swapping chat/coder models. Monaco init is try/caught so a missing `vs/` cannot blank the whole UI.

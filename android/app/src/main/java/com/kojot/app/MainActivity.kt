@@ -458,6 +458,8 @@ class MainActivity : Activity() {
         if (svc == null) {
             return JSONObject().put("ok", false).put("error", "Server not ready — open the app fully, then try again").put("slot", activeSlot)
         }
+        // Free vision OCR RAM before loading another GGUF (stops "app keeps stopping" OOM)
+        try { svc.stopOcr() } catch (_: Exception) {}
         notifyModelLoading(true, if (slot == "coder") "Loading coder model…" else "Loading chat model…")
         val result = svc.swapModel(slot)
         notifyModelLoading(false, if (result.optBoolean("ok")) "Model ready" else (result.optString("error", "Swap failed")))
@@ -674,12 +676,8 @@ class MainActivity : Activity() {
                     runOnUiThread { if (llama != null) llama?.restartServers() else bindAndStartService() }
                 }
                 "ocr", "image" -> {
+                    // Path only — OCR server starts on demand (first ocr_pdf/ocr_image) to avoid OOM
                     prefs.edit().putString("${slot}_path", f.canonicalPath).putString("${slot}_name", f.name).apply()
-                    if (slot == "ocr") {
-                        runOnUiThread {
-                            try { llama?.restartOcr() } catch (_: Exception) {}
-                        }
-                    }
                 }
                 else -> {
                     prefs.edit().putString("model_path", f.canonicalPath).putString("model_name", f.name).apply()
@@ -757,14 +755,31 @@ class MainActivity : Activity() {
         }
         in PdfTools.OPS -> {
             if (!filesOk()) throw ToolError("Files access isn't granted yet. Open Settings → Tools → Files and tap Grant.")
+            // Lazy-start vision OCR only when actually OCRing and a GGUF+mmproj is bound
+            if (op == "ocr_pdf" || op == "ocr_image") {
+                try { llama?.ensureOcr(45_000L) } catch (e: Exception) {
+                    android.util.Log.w("Kojot", "ensureOcr: ${e.message}")
+                }
+            }
             PdfTools(rootDir(), applicationContext).run(op, a)
+        }
+        "stop_ocr" -> {
+            try { llama?.stopOcr() } catch (_: Exception) {}
+            JSONObject().put("ok", true).put("text", "OCR server stopped")
+        }
+        "ensure_ocr" -> {
+            val ok = try { llama?.ensureOcr(60_000L) == true } catch (_: Exception) { false }
+            JSONObject().put("ok", ok).put("ocr_ready", ok)
+                .put("text", if (ok) "OCR vision server ready" else "OCR not available (ML Kit fallback)")
         }
         else -> {
             if (!filesOk()) throw ToolError("Files access isn't granted yet. Open Settings → Tools → Files and tap Grant.")
             val gatesRaw = prefs.getString("file_gates", "[]") ?: "[]"
             val gatesArr = try { JSONArray(gatesRaw) } catch (_: Exception) { JSONArray() }
-            val gates = (0 until gatesArr.length()).mapNotNull {
-                gatesArr.optString(it)?.trim()?.takeIf { s -> s.isNotEmpty() }
+            val gates = mutableListOf<String>()
+            for (gi in 0 until gatesArr.length()) {
+                val s = gatesArr.optString(gi, "").trim()
+                if (s.isNotEmpty()) gates.add(s)
             }
             FileTools(rootDir(), gates).run(op, a)
         }

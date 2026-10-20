@@ -1799,7 +1799,7 @@ function paneTools(){return`<div class="pane" data-p="tool"><div class="sec">Pho
  <div class="tst" id="ext-m-msg"></div>
 
  <div class="sec">OCR engine</div>
- <div class="note" style="margin:0 0 8px">Default is on-device <b>ML Kit</b>. Bind a vision GGUF with the <b>OCR</b> button above to start a runner on <code>:8082</code>. Put a matching <code>*mmproj*.gguf</code> next to the model for image input. Without mmproj or if the server is down, OCR falls back to ML Kit. Line geometry always comes from ML Kit when available.</div>
+ <div class="note" style="margin:0 0 8px">Default is on-device <b>ML Kit</b>. Bind a vision GGUF + matching <code>*mmproj*.gguf</code> with the <b>OCR</b> button — the runner starts <b>only when you OCR</b> (not at launch) so it does not compete with chat/coder for RAM. Opening the code editor stops the OCR server. Without mmproj, ML Kit is used.</div>
  <div class="set"><div class="lt"><span id="ocr-st">OCR path (optional)</span><small id="ocr-s">not set · using ML Kit</small></div></div>
  <div class="tst" id="ocr-m"></div>
 
@@ -3056,13 +3056,15 @@ let ed=null, edFile='untitled.html', edDirty=false, edWrap=true, edPath='.', edC
 let edSteps=[''], edIdx=0, edBackup=null, edDecos=[], edManual=false, edHist=[], edHistN=0;
 const edBuzz=()=>{if(navigator.vibrate)navigator.vibrate(10)};
 function edToast(msg,kind,ms){kind=kind||'info';ms=ms||2200;const stack=$('#ed-toast');const el=document.createElement('div');el.className='t'+(kind==='error'?' err':kind==='ok'?' ok':'');el.textContent=msg;stack.appendChild(el);requestAnimationFrame(()=>el.classList.add('show'));setTimeout(()=>{el.classList.remove('show');setTimeout(()=>el.remove(),220)},ms)}
-function edLang(name){const e=(name.split('.').pop()||'').toLowerCase();return({html:'html',htm:'html',js:'javascript',mjs:'javascript',cjs:'javascript',ts:'typescript',tsx:'typescript',css:'css',scss:'scss',json:'json',md:'markdown',markdown:'markdown',py:'python',yaml:'yaml',yml:'yaml',kt:'kotlin',kts:'kotlin',java:'java',go:'go',rs:'rust',c:'c',cpp:'cpp',h:'c',hpp:'cpp',xml:'xml',svg:'xml',sh:'shell',toml:'plaintext',txt:'plaintext'})[e]||'plaintext'}
+function edLang(name){const e=(name.split('.').pop()||'').toLowerCase();const map={html:'html',htm:'html',js:'javascript',mjs:'javascript',cjs:'javascript',ts:'typescript',tsx:'typescript',css:'css',scss:'scss',json:'json',md:'markdown',markdown:'markdown',py:'python',yaml:'yaml',yml:'yaml',kt:'kotlin',kts:'kotlin',java:'java',go:'go',rs:'rust',c:'c',cpp:'cpp',h:'c',hpp:'cpp',xml:'xml',svg:'xml',sh:'shell'};try{const id=map[e]||'plaintext';if(typeof monaco!=='undefined'&&monaco.languages&&!monaco.languages.getLanguages().some(l=>l.id===id)&&id!=='plaintext')return 'plaintext';return id;}catch(_){return map[e]||'plaintext'}}
 function setEdDirty(s){edDirty=s;$('#ed-dirty').classList.toggle('on',!!s)}
 function showEditor(on){
   setTimeout(syncBack, 10);
   const eng = $('#ed-engine');
   if (on) {
-    ninfo();
+    // Free OCR GGUF RAM before Monaco + optional coder load (prevents process kills)
+    try{ nat('stop_ocr',{}); }catch(_){}
+    try{ ninfo(); }catch(_){}
     if (NI && NI.coder_model) {
       if (eng) { eng.textContent = 'Swapping to Coder…'; eng.style.color = 'var(--gold)'; }
       (async()=>{
@@ -3078,26 +3080,30 @@ function showEditor(on){
           try{
             if(i) await new Promise(r=>setTimeout(r,800*i));
             const raw=await nat('swap_model',{slot:'coder'});
-            const r=JSON.parse(raw);
-            if(r.ok){ ok=true; await ninfo(); label(); }
+            const r=typeof raw==='string'?JSON.parse(raw):raw;
+            if(r && r.ok){ ok=true; await ninfo(); label(); }
           }catch(_){}
         }
         if(!ok && eng){ eng.textContent='Main Engine'; eng.style.color='var(--fg-3)'; }
-      })();
+      })().catch(()=>{ if(eng){ eng.textContent='Main Engine'; eng.style.color='var(--fg-3)'; } });
     } else if (eng) {
       eng.textContent = 'Main Engine'; eng.style.color = 'var(--fg-3)';
     }
   } else {
-    ninfo();
+    try{ ninfo(); }catch(_){}
     if (NI && NI.coder_model && NI.active_slot === 'coder') {
       nat('swap_model', { slot: 'chat' }).catch(() => {});
     }
   }
-  $('#editor-view').classList.toggle('on',on);
-  document.querySelector('.main')?.classList.toggle('hidden-for-ed',on);
-  document.querySelectorAll('.ed-nav').forEach(b=>b.classList.toggle('on',on));
-  if(on){initMonaco();setTimeout(()=>ed&&ed.layout(),80)}
-  else if(!edChainRunning){/* keep chat alive */}
+  try{
+    $('#editor-view').classList.toggle('on',on);
+    document.querySelector('.main')?.classList.toggle('hidden-for-ed',on);
+    document.querySelectorAll('.ed-nav').forEach(b=>b.classList.toggle('on',on));
+    if(on){
+      try{ initMonaco(); }catch(e){ console.error('initMonaco',e); try{edToast('Editor failed: '+(e.message||e),'error',5000)}catch(_){}}
+      setTimeout(()=>{ try{ ed&&ed.layout(); }catch(_){ } },80);
+    }
+  }catch(e){ console.error('showEditor',e); }
 }
 $('#ed-open')?.addEventListener('click',()=>{showEditor(true);$('#sb')?.classList.remove('open');$('#scrim')?.classList.remove('on')});
 $('#ed-toggle')?.addEventListener('click',()=>showEditor(!$('#editor-view').classList.contains('on')));
@@ -3106,36 +3112,60 @@ $('#ed-back')?.addEventListener('click',()=>{if(edChainRunning){edToast('Finish 
 function initMonaco(){
   if(ed) return;
   if(typeof require==='undefined'){edToast('Monaco loader missing (offline vs/ not bundled)','error',4000);return}
-  window.MonacoEnvironment={getWorkerUrl:function(){return`data:text/javascript;charset=utf-8,${encodeURIComponent(`self.MonacoEnvironment={baseUrl:'./vs/'};importScripts('./vs/base/worker/workerMain.js');`)}`}};
-  require.config({paths:{vs:'./vs'}});
-  require(['vs/editor/editor.main'],function(){
-    monaco.editor.defineTheme('lc-dark',{base:'vs-dark',inherit:true,rules:[
-      {token:'comment',foreground:'8e8e8e',fontStyle:'italic'},
-      {token:'keyword',foreground:'e5b567',fontStyle:'bold'},
-      {token:'string',foreground:'5eead4'},
-      {token:'number',foreground:'f43f5e'}
-    ],colors:{
-      'editor.background':'#000000','editor.foreground':'#ececec',
-      'editorLineNumber.foreground':'#5d5d5d','editorLineNumber.activeForeground':'#e5b567',
-      'editorCursor.foreground':'#e5b567','editor.lineHighlightBackground':'#1a1a1a',
-      'editor.selectionBackground':'#2f4a6a'
-    }});
-    ed=monaco.editor.create($('#ed-container'),{
-      value:'',language:'html',theme:'lc-dark',automaticLayout:true,fontSize:13,lineHeight:20,
-      lineNumbers:'on',wordWrap:'on',minimap:{enabled:false},scrollBeyondLastLine:false,tabSize:2,folding:false
+  try{
+    window.MonacoEnvironment={getWorkerUrl:function(workerId, label){
+      try{
+        return URL.createObjectURL(new Blob([
+          "self.MonacoEnvironment={baseUrl:'./vs/'};",
+          "importScripts('./vs/base/worker/workerMain.js');"
+        ],{type:'text/javascript'}));
+      }catch(_){
+        return 'data:text/javascript;charset=utf-8,'+encodeURIComponent("self.MonacoEnvironment={baseUrl:'./vs/'};importScripts('./vs/base/worker/workerMain.js');");
+      }
+    }};
+    require.config({paths:{vs:'./vs'}});
+    require(['vs/editor/editor.main'],function(){
+      try{
+        monaco.editor.defineTheme('lc-dark',{base:'vs-dark',inherit:true,rules:[
+          {token:'comment',foreground:'8e8e8e',fontStyle:'italic'},
+          {token:'keyword',foreground:'e5b567',fontStyle:'bold'},
+          {token:'string',foreground:'5eead4'},
+          {token:'number',foreground:'f43f5e'}
+        ],colors:{
+          'editor.background':'#000000','editor.foreground':'#ececec',
+          'editorLineNumber.foreground':'#5d5d5d','editorLineNumber.activeForeground':'#e5b567',
+          'editorCursor.foreground':'#e5b567','editor.lineHighlightBackground':'#1a1a1a',
+          'editor.selectionBackground':'#2f4a6a'
+        }});
+        const host=$('#ed-container');
+        if(!host){ edToast('Editor container missing','error',4000); return; }
+        ed=monaco.editor.create(host,{
+          value:'',language:'html',theme:'lc-dark',automaticLayout:true,fontSize:13,lineHeight:20,
+          lineNumbers:'on',wordWrap:'on',minimap:{enabled:false},scrollBeyondLastLine:false,tabSize:2,folding:false
+        });
+        ed.onDidChangeModelContent(()=>setEdDirty(true));
+        ed.onDidChangeCursorPosition(e=>{$('#ed-pos').textContent=`Ln ${e.position.lineNumber}, Col ${e.position.column}`});
+        document.querySelectorAll('#ed-acc [data-k]').forEach(btn=>{
+          btn.addEventListener('click',()=>{edBuzz();const k=btn.dataset.k;
+            if(k==='TAB')ed.trigger('keyboard','tab',null);
+            else if(k==='ARROW_LEFT')ed.trigger('keyboard','cursorLeft',null);
+            else if(k==='ARROW_RIGHT')ed.trigger('keyboard','cursorRight',null);
+            else ed.trigger('keyboard','type',{text:k});
+            ed.focus();
+          });
+        });
+      }catch(e){
+        console.error('Monaco create failed', e);
+        edToast('Editor init failed: '+(e&&e.message||e),'error',5000);
+      }
+    }, function(err){
+      console.error('Monaco load failed', err);
+      edToast('Monaco failed to load (vs/ missing or corrupt)','error',5000);
     });
-    ed.onDidChangeModelContent(()=>setEdDirty(true));
-    ed.onDidChangeCursorPosition(e=>{$('#ed-pos').textContent=`Ln ${e.position.lineNumber}, Col ${e.position.column}`});
-    document.querySelectorAll('#ed-acc [data-k]').forEach(btn=>{
-      btn.addEventListener('click',()=>{edBuzz();const k=btn.dataset.k;
-        if(k==='TAB')ed.trigger('keyboard','tab',null);
-        else if(k==='ARROW_LEFT')ed.trigger('keyboard','cursorLeft',null);
-        else if(k==='ARROW_RIGHT')ed.trigger('keyboard','cursorRight',null);
-        else ed.trigger('keyboard','type',{text:k});
-        ed.focus();
-      });
-    });
-  });
+  }catch(e){
+    console.error('initMonaco', e);
+    edToast('Editor error: '+(e&&e.message||e),'error',5000);
+  }
 }
 
 /* ---- Native open / save ---- */
@@ -3167,7 +3197,7 @@ async function edRenderBrowser(){
           const j=JSON.parse(raw);const text=j.text||'';
           // If truncated, re-read without limit via a full write path — use max 8000 for safety in editor seed
           if(!ed)initMonaco();
-          const apply=()=>{ed.setValue(text);edFile=e.p;$('#ed-fname').textContent=e.p;monaco.editor.setModelLanguage(ed.getModel(),edLang(e.p));setEdDirty(false);$('#ed-fbrowser').classList.remove('open');edToast('Opened '+e.p,'ok')};
+          const apply=()=>{ed.setValue(text);edFile=e.p;$('#ed-fname').textContent=e.p;try{monaco.editor.setModelLanguage(ed.getModel(),edLang(e.p))}catch(_e){try{monaco.editor.setModelLanguage(ed.getModel(),'plaintext')}catch(__){}};setEdDirty(false);$('#ed-fbrowser').classList.remove('open');edToast('Opened '+e.p,'ok')};
           if(ed)apply();else setTimeout(apply,600);
         }catch(err){edToast(err.message||String(err),'error')}
       };
@@ -3950,7 +3980,7 @@ const FV = {
           const raw=await nat('read_file',{path:e.p,full:true});
           const j=JSON.parse(raw);
           if(!ed)initMonaco();
-          const apply=()=>{ed.setValue(j.text||'');edFile=e.p;$('#ed-fname').textContent=e.p;monaco.editor.setModelLanguage(ed.getModel(),edLang(e.p));setEdDirty(false)};
+          const apply=()=>{ed.setValue(j.text||'');edFile=e.p;$('#ed-fname').textContent=e.p;try{monaco.editor.setModelLanguage(ed.getModel(),edLang(e.p))}catch(_e){try{monaco.editor.setModelLanguage(ed.getModel(),'plaintext')}catch(__){}};setEdDirty(false)};
           if(ed)apply(); else setTimeout(apply,600);
         }catch(err){ alert(err.message||err) }
         return;
