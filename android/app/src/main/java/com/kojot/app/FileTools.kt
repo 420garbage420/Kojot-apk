@@ -11,11 +11,23 @@ import java.util.Locale
 class ToolError(msg: String) : Exception(msg)
 
 /** Kotlin port of file_ops.py plus read-only helpers. Everything is confined to [rootDir]. */
-class FileTools(rootDir: File) {
+class FileTools(rootDir: File, private val gates: List<String> = emptyList()) {
     private val root: File = rootDir.canonicalFile
     private val dateFmt = SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.US)
 
     private fun rel(f: File): String = if (f == root) "." else f.relativeTo(root).path
+
+    /** User-configured AI permission gates (relative paths). Blocked for all tool ops. */
+    private fun isGated(relPath: String): Boolean {
+        val r = relPath.trim().trimStart('/').trimEnd('/')
+        if (r.isEmpty() || r == ".") return false
+        for (g in gates) {
+            val gg = g.trim().trimStart('/').trimEnd('/')
+            if (gg.isEmpty()) continue
+            if (r == gg || r.startsWith("$gg/")) return true
+        }
+        return false
+    }
 
     fun safe(p: String?): File {
         val s = (p ?: ".").trim().ifEmpty { "." }
@@ -23,6 +35,9 @@ class FileTools(rootDir: File) {
         val c = f.canonicalFile
         if (c != root && !c.path.startsWith(root.path + File.separator))
             throw ToolError("refused: $s is outside the workspace (${root.path})")
+        val r = rel(c)
+        if (isGated(r))
+            throw ToolError("refused: path is gated by user (AI blocked): $r")
         return c
     }
 

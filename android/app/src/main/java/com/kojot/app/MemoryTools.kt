@@ -393,6 +393,29 @@ class MemoryTools(private val dbFile: File, private val workspace: () -> File) {
         return result("cleared $n facts")
     }
 
+    /** Update an existing memory topic (Claude-style edit). */
+    fun updateFact(a: JSONObject): JSONObject {
+        val id = a.optLong("id", -1)
+        if (id <= 0) throw ToolError("id is required")
+        var content = a.optString("content", "").trim()
+        if (content.isEmpty()) throw ToolError("content is required")
+        content = content.split(Regex("\\s+")).take(40).joinToString(" ").take(240)
+        val tag = a.optString("tag", "").trim().uppercase().take(24)
+        val vec = getEmbedding(if (tag.isNotEmpty()) "[$tag] $content" else content)
+        if (tag.isNotEmpty()) {
+            db.execSQL(
+                "UPDATE facts SET content=?, tag=?, vec=? WHERE id=?",
+                arrayOf(content, tag, vec?.let { packVec(it) }, id)
+            )
+        } else {
+            db.execSQL(
+                "UPDATE facts SET content=?, vec=? WHERE id=?",
+                arrayOf(content, vec?.let { packVec(it) }, id)
+            )
+        }
+        return result("updated fact #$id")
+    }
+
     fun stats(): JSONObject {
         val facts = db.compileStatement("SELECT COUNT(*) FROM facts").simpleQueryForLong()
         val files = db.compileStatement("SELECT COUNT(*) FROM file_index").simpleQueryForLong()
@@ -565,6 +588,7 @@ class MemoryTools(private val dbFile: File, private val workspace: () -> File) {
         "cancel_indexing" -> cancelIndexing()
         "list_facts" -> listFacts(a)
         "clear_facts" -> clearFacts(a)
+        "update_fact" -> updateFact(a)
         "memory_stats" -> stats()
         "get_user_anchor" -> getUserAnchor()
         "set_user_anchor" -> setUserAnchor(a)

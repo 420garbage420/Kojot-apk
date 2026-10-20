@@ -32,19 +32,44 @@ class MainActivity : Activity() {
     private lateinit var msg: TextView
     private lateinit var web: WebView
     private val prefs by lazy { getSharedPreferences("lc", Context.MODE_PRIVATE) }
-    private val embModel get() = File(filesDir, "nomic.gguf")
-    private val coderModel get() = File(filesDir, "coder.gguf")
-
-    /** Prefer external path (no copy) when set and still readable; else fall back to copied filesDir/model.gguf */
-    private fun modelFile(): File {
-        val external = prefs.getString("model_path", null)
+    /** Prefer external path (no copy). Never require a second copy under filesDir. */
+    private fun resolveModel(prefKey: String, fallbackName: String): File {
+        val external = prefs.getString(prefKey, null)
         if (!external.isNullOrBlank()) {
             val f = File(external)
             if (f.isFile && f.canRead()) return f
         }
-        return File(filesDir, "model.gguf")
+        return File(filesDir, fallbackName)
     }
+    private fun modelFile(): File = resolveModel("model_path", "model.gguf")
+    private fun coderModelFile(): File = resolveModel("coder_path", "coder.gguf")
+    private fun embModelFile(): File = resolveModel("emb_path", "nomic.gguf")
     private val model get() = modelFile()
+    private val embModel get() = embModelFile()
+    private val coderModel get() = coderModelFile()
+
+    /** Default: /sdcard/Download/Local Models — optional subfolders: llm, embed, coder, image, ocr, decision */
+    private val modelSubdirs = listOf("llm", "embed", "coder", "image", "ocr", "decision")
+
+    private fun modelsDir(): File {
+        val saved = prefs.getString("models_dir", null)
+        val root = if (!saved.isNullOrBlank()) File(saved) else
+            File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), "Local Models")
+        if (!root.exists()) try { root.mkdirs() } catch (_: Exception) {}
+        // Ensure category folders exist (user can drop GGUFs into any of them)
+        for (sub in modelSubdirs) {
+            try { File(root, sub).mkdirs() } catch (_: Exception) {}
+        }
+        return root
+    }
+
+    private fun categoryOfModel(f: File, root: File): String {
+        return try {
+            val rel = f.parentFile?.canonicalPath?.removePrefix(root.canonicalPath)?.trimStart('/', '\\') ?: ""
+            val top = rel.substringBefore('/').substringBefore('\\').lowercase()
+            if (top in modelSubdirs) top else "root"
+        } catch (_: Exception) { "root" }
+    }
     private var memory: MemoryTools? = null
 
     private var wakeLock: PowerManager.WakeLock? = null
@@ -260,11 +285,16 @@ class MainActivity : Activity() {
         }, REQ_CODER)
     }
 
-    /** Try to resolve a real filesystem path from a content/file URI (avoids GB-scale copies). */
-    private fun resolveRealPath(uri: Uri): String? {
+    /**
+     * Resolve a real filesystem path from a content/file URI so we never copy multi-GB GGUFs.
+     * Tries MediaStore, DocumentsContract tree paths, and common Download/Local Models layouts.
+     */
+    private fun resolveRealPath(uri: Uri, displayName: String? = null): String? {
         try {
-            if ("file".equals(uri.scheme, ignoreCase = true)) return uri.path
-            // MediaStore / Downloads style
+            if ("file".equals(uri.scheme, ignoreCase = true)) {
+                val p = uri.path
+                if (!p.isNullOrBlank() && File(p).canRead()) return p
+            }
             contentResolver.query(uri, arrayOf(android.provider.MediaStore.MediaColumns.DATA), null, null, null)?.use { c ->
                 if (c.moveToFirst()) {
                     val idx = c.getColumnIndex(android.provider.MediaStore.MediaColumns.DATA)
@@ -274,7 +304,6 @@ class MainActivity : Activity() {
                     }
                 }
             }
-            // Some providers expose _data
             contentResolver.query(uri, null, null, null, null)?.use { c ->
                 if (c.moveToFirst()) {
                     for (col in arrayOf("_data", "filePath", "path")) {
@@ -286,18 +315,77 @@ class MainActivity : Activity() {
                     }
                 }
             }
+            // Heuristic: Downloads / Local Models / same folder as models_dir
+            val name = displayName?.takeIf { it.isNotBlank() }
+            if (name != null) {
+                val candidates = listOf(
+                    File(modelsDir(), name),
+                    File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), name),
+                    File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), "Local Models/$name"),
+                    File(Environment.getExternalStorageDirectory(), "Download/$name"),
+                    File(Environment.getExternalStorageDirectory(), "Download/Local Models/$name"),
+                    File(Environment.getExternalStorageDirectory(), "Downloads/$name"),
+                    File(Environment.getExternalStorageDirectory(), "Downloads/Local Models/$name")
+                )
+                for (f in candidates) {
+                    if (f.isFile && f.canRead()) return f.canonicalPath
+                }
+            }
+            // Document tree primary: content://.../document/primary%3ADownload%2FLocal%20Models%2Ffoo.gguf
+            val docId = try {
+                android.provider.DocumentsContract.getDocumentId(uri)
+            } catch (_: Exception) { null }
+            if (!docId.isNullOrBlank() && docId.contains(':')) {
+                val rel = docId.substringAfter(':').replace(':', '/')
+                val primary = File(Environment.getExternalStorageDirectory(), rel)
+                if (primary.isFile && primary.canRead()) return primary.canonicalPath
+            }
         } catch (_: Exception) {}
         return null
     }
 
+    private fun bindExternalModel(r: Int, realPath: String, fileName: String?) {
+        val name = fileName ?: File(realPath).name
+        val ed = prefs.edit()
+        when (r) {
+            REQ_MODEL -> {
+                ed.putString("model_path", realPath).putString("model_name", name)
+                File(filesDir, "model.gguf").let { if (it.exists()) it.delete() }
+            }
+            REQ_CODER -> {
+                ed.putString("coder_path", realPath).putString("coder_name", name)
+                File(filesDir, "coder.gguf").let { if (it.exists()) it.delete() }
+            }
+            REQ_EMB -> {
+                ed.putString("emb_path", realPath).putString("emb_name", name)
+                File(filesDir, "nomic.gguf").let { if (it.exists()) it.delete() }
+            }
+        }
+        ed.apply()
+        runOnUiThread {
+            msg.text = "Using from folder (no copy):\n$name"
+            when (r) {
+                REQ_MODEL -> start()
+                REQ_EMB -> {
+                    if (llama != null) llama?.restartServers() else bindAndStartService()
+                }
+                REQ_CODER -> {
+                    if (llama != null) llama?.restartServers() else bindAndStartService()
+                }
+            }
+            try {
+                web.evaluateJavascript("try{window.ninfo&&window.ninfo()}catch(e){}", null)
+            } catch (_: Exception) {}
+        }
+    }
+
     @Deprecated("plain Activity keeps this dependency-free")
     override fun onActivityResult(r: Int, c: Int, d: Intent?) {
-        val u = d?.data
-        if (c != RESULT_OK || u == null) {
+        if (c != RESULT_OK || d?.data == null) {
             if (r == REQ_MODEL) msg.text = "No file chosen. Tap to try again."
             return
         }
-        val uri = d?.data ?: return
+        val uri = d.data ?: return
         try { contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION) } catch (_: Exception) {}
 
         val fileName = try {
@@ -312,72 +400,23 @@ class MainActivity : Activity() {
             REQ_CODER -> fileName?.let { prefs.edit().putString("coder_name", it).apply() }
         }
 
-        val label = when (r) {
-            REQ_EMB -> "embedding model"
-            REQ_CODER -> "coder model"
-            else -> "model"
-        }
-
-        // Prefer zero-copy: if we can get a real path, point at it directly (saves GB of storage + IO)
-        val realPath = resolveRealPath(uri)
-        if (realPath != null && r == REQ_MODEL) {
-            prefs.edit().putString("model_path", realPath).apply()
-            // Clean any previous copied model to reclaim space
-            File(filesDir, "model.gguf").let { if (it.exists()) it.delete() }
-            runOnUiThread {
-                msg.text = "Using model from directory (no copy):\n${File(realPath).name}"
-                start()
-            }
+        // Always try zero-copy for ALL model types (chat, coder, embedding)
+        val realPath = resolveRealPath(uri, fileName)
+        if (realPath != null) {
+            bindExternalModel(r, realPath, fileName)
             return
         }
-        if (realPath != null && r == REQ_CODER) {
-            // For coder we still prefer a stable local file for swap reliability, but record path
-            prefs.edit().putString("coder_path", realPath).apply()
-        }
 
-        val dest = when (r) {
-            REQ_MODEL -> File(filesDir, "model.gguf")
-            REQ_EMB -> embModel
-            REQ_CODER -> coderModel
-            else -> return
-        }
-        thread {
+        // Last resort: refuse silent multi-GB copy — ask user to put file under models folder
+        val dir = modelsDir().path
+        runOnUiThread {
+            msg.text = "Could not resolve a real path (no copy).\nPut the .gguf in:\n$dir\nthen pick it again — or use Settings → Models folder."
             try {
-                val tmp = File(filesDir, "$label.part")
-                val total = contentResolver.openFileDescriptor(uri, "r")?.use { it.statSize } ?: 0L
-                contentResolver.openInputStream(uri)!!.use { i ->
-                    tmp.outputStream().use { o ->
-                        val buf = ByteArray(1 shl 20); var n = 0L; var last = 0L; var k: Int
-                        while (i.read(buf).also { k = it } > 0) {
-                            o.write(buf, 0, k); n += k
-                            if (n - last > (32 shl 20)) {
-                                last = n
-                                runOnUiThread { msg.text = "Copying $label… ${n shr 20} / ${total shr 20} MB" }
-                            }
-                        }
-                    }
-                }
-                if (dest.exists()) dest.delete()
-                tmp.renameTo(dest)
-                if (r == REQ_MODEL) {
-                    // Clear external path so we use the stable copy
-                    prefs.edit().remove("model_path").apply()
-                }
-                runOnUiThread {
-                    if (r == REQ_MODEL) start()
-                    else if (r == REQ_EMB) {
-                        llama?.restartServers()
-                        msg.text = if (web.visibility == View.VISIBLE) msg.text else "Embedding model installed."
-                    } else if (r == REQ_CODER) {
-                        // Ensure service sees the new file; one restart is enough (no double-pick)
-                        if (llama != null) llama?.restartServers()
-                        else bindAndStartService()
-                        msg.text = if (web.visibility == View.VISIBLE) "Coder model installed." else "Coder model installed."
-                    }
-                }
-            } catch (e: Exception) {
-                runOnUiThread { msg.text = "Copy failed: ${e.message}\nTap to retry." }
-            }
+                web.evaluateJavascript(
+                    "try{alert(${JSONObject.quote("Could not use model in-place. Copy it into your Models folder:\\n$dir\\nthen Switch model again. Kojot will not create a second multi-GB copy.")})}catch(e){}",
+                    null
+                )
+            } catch (_: Exception) {}
         }
     }
 
@@ -467,7 +506,8 @@ class MainActivity : Activity() {
     private val memoryOps = setOf(
         "save_fact", "recall_memory", "recall_files", "sync_file_index",
         "start_indexing", "get_indexing_status", "cancel_indexing",
-        "list_facts", "clear_facts", "memory_stats", "get_user_anchor", "set_user_anchor"
+        "list_facts", "clear_facts", "update_fact", "memory_stats",
+        "get_user_anchor", "set_user_anchor"
     )
 
     private fun getVitals(): JSONObject {
@@ -524,17 +564,17 @@ class MainActivity : Activity() {
         "get_vitals" -> getVitals()
         "http" -> http(a)
         "delete_coder" -> {
-            if (coderModel.exists()) coderModel.delete()
-            prefs.edit().remove("coder_name").remove("srv_coder").apply()
+            // Only drop the pointer / optional local copy — never delete the user's only GGUF in models folder
+            prefs.edit().remove("coder_path").remove("coder_name").remove("srv_coder").apply()
+            File(filesDir, "coder.gguf").let { if (it.exists()) it.delete() }
             if (activeSlot == "coder") swapModel("chat")
-            JSONObject().put("ok", true).put("text", "coder model deleted")
+            JSONObject().put("ok", true).put("text", "coder model unbound (folder file kept)")
         }
         "delete_emb" -> {
-            if (embModel.exists()) embModel.delete()
-            prefs.edit().remove("emb_name").apply()
-            // embedding process is owned by LlamaService; restart to drop it
+            prefs.edit().remove("emb_path").remove("emb_name").apply()
+            File(filesDir, "nomic.gguf").let { if (it.exists()) it.delete() }
             llama?.restartServers()
-            JSONObject().put("ok", true).put("text", "embedding model deleted")
+            JSONObject().put("ok", true).put("text", "embedding model unbound (folder file kept)")
         }
         "pick_coder" -> {
             runOnUiThread { pickCoder() }
@@ -545,11 +585,110 @@ class MainActivity : Activity() {
             JSONObject().put("text", "model picker opened")
         }
         "delete_model" -> {
-            // Remove both external pointer and any local copy; does NOT wipe chats/prefs/memory
+            // Unbind only — does NOT delete the GGUF in the user's models folder
             prefs.edit().remove("model_path").remove("model_name").apply()
             File(filesDir, "model.gguf").let { if (it.exists()) it.delete() }
             llama?.stopServers()
-            JSONObject().put("ok", true).put("text", "main model removed (data preserved)")
+            JSONObject().put("ok", true).put("text", "main model unbound (folder file kept; chats/memory kept)")
+        }
+        "set_models_dir" -> {
+            val p = a.optString("path").ifBlank {
+                File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), "Local Models").path
+            }
+            val d = File(p)
+            if (!d.exists()) try { d.mkdirs() } catch (_: Exception) {}
+            if (!d.isDirectory) throw ToolError("not a folder: $p")
+            prefs.edit().putString("models_dir", d.canonicalPath).apply()
+            // recreate category subfolders under the new root
+            modelsDir()
+            JSONObject().put("text", d.canonicalPath).put("path", d.canonicalPath)
+                .put("subdirs", org.json.JSONArray(modelSubdirs))
+        }
+        "get_models_dir" -> {
+            val d = modelsDir()
+            JSONObject().put("text", d.path).put("path", d.path)
+                .put("subdirs", org.json.JSONArray(modelSubdirs))
+        }
+        "list_models_dir" -> {
+            val d = modelsDir()
+            if (!d.isDirectory) throw ToolError("models folder missing: ${d.path}")
+            val found = ArrayList<File>()
+            fun walk(dir: File, depth: Int) {
+                if (depth > 3) return
+                val kids = dir.listFiles() ?: return
+                for (c in kids) {
+                    if (c.isDirectory) walk(c, depth + 1)
+                    else if (c.isFile && c.name.endsWith(".gguf", true)) found.add(c)
+                }
+            }
+            walk(d, 0)
+            found.sortBy { it.absolutePath.lowercase() }
+            val arr = org.json.JSONArray()
+            found.forEach { f ->
+                val cat = categoryOfModel(f, d)
+                // Suggested slot from folder name
+                val suggest = when (cat) {
+                    "embed" -> "emb"
+                    "coder" -> "coder"
+                    "llm", "decision" -> "chat"
+                    "image", "ocr" -> cat // not bound as chat by default
+                    else -> "chat"
+                }
+                arr.put(JSONObject()
+                    .put("name", f.name)
+                    .put("path", f.absolutePath)
+                    .put("size", f.length())
+                    .put("mb", f.length() / 1048576.0)
+                    .put("category", cat)
+                    .put("suggest_slot", suggest))
+            }
+            JSONObject().put("text", "${found.size} GGUF under ${d.path}")
+                .put("path", d.path)
+                .put("subdirs", org.json.JSONArray(modelSubdirs))
+                .put("models", arr)
+        }
+        "select_model" -> {
+            val path = a.optString("path")
+            var slot = a.optString("slot", "chat") // chat | coder | emb
+            val f = File(path)
+            if (!f.isFile || !f.canRead()) throw ToolError("not readable: $path")
+            // Auto-slot from parent folder when caller passes "auto"
+            if (slot == "auto" || slot.isBlank()) {
+                val cat = categoryOfModel(f, modelsDir())
+                slot = when (cat) {
+                    "embed" -> "emb"
+                    "coder" -> "coder"
+                    else -> "chat"
+                }
+            }
+            when (slot) {
+                "coder" -> {
+                    prefs.edit().putString("coder_path", f.canonicalPath).putString("coder_name", f.name).apply()
+                    File(filesDir, "coder.gguf").let { if (it.exists()) it.delete() }
+                    runOnUiThread { if (llama != null) llama?.restartServers() else bindAndStartService() }
+                }
+                "emb", "embedding" -> {
+                    prefs.edit().putString("emb_path", f.canonicalPath).putString("emb_name", f.name).apply()
+                    File(filesDir, "nomic.gguf").let { if (it.exists()) it.delete() }
+                    runOnUiThread { if (llama != null) llama?.restartServers() else bindAndStartService() }
+                }
+                "ocr", "image" -> {
+                    // Reserved — OCR today is ML Kit (not a GGUF). Path stored for a future engine.
+                    prefs.edit().putString("${slot}_path", f.canonicalPath).putString("${slot}_name", f.name).apply()
+                }
+                else -> {
+                    prefs.edit().putString("model_path", f.canonicalPath).putString("model_name", f.name).apply()
+                    File(filesDir, "model.gguf").let { if (it.exists()) it.delete() }
+                    runOnUiThread { restartServer() }
+                }
+            }
+            if (slot == "ocr" || slot == "image") {
+                JSONObject().put("ok", true)
+                    .put("text", "recorded $slot → ${f.name} (OCR still uses on-device ML Kit; this path is reserved)")
+                    .put("path", f.canonicalPath)
+            } else {
+                JSONObject().put("ok", true).put("text", "bound $slot → ${f.name} (no copy)").put("path", f.canonicalPath)
+            }
         }
         "swap_model" -> swapModel(a.optString("slot", "chat"))
         "set_coder_srv" -> {
@@ -572,6 +711,19 @@ class MainActivity : Activity() {
             if (!d.isDirectory) throw ToolError("not a folder: ${d.path}")
             prefs.edit().putString("root", d.canonicalPath).apply()
             JSONObject().put("text", d.canonicalPath)
+        }
+        "set_file_gates" -> {
+            val arr = a.optJSONArray("paths") ?: JSONArray()
+            val list = (0 until arr.length()).mapNotNull {
+                arr.optString(it)?.trim()?.takeIf { s -> s.isNotEmpty() }
+            }
+            prefs.edit().putString("file_gates", JSONArray(list).toString()).apply()
+            JSONObject().put("text", "gates saved (${list.size})").put("paths", JSONArray(list))
+        }
+        "get_file_gates" -> {
+            val raw = prefs.getString("file_gates", "[]") ?: "[]"
+            val arr = try { JSONArray(raw) } catch (_: Exception) { JSONArray() }
+            JSONObject().put("text", "gates=${arr.length()}").put("paths", arr)
         }
         "restart" -> {
             prefs.edit().putString("srv", (a.optJSONObject("srv") ?: JSONObject()).toString()).apply()
@@ -598,7 +750,12 @@ class MainActivity : Activity() {
         }
         else -> {
             if (!filesOk()) throw ToolError("Files access isn't granted yet. Open Settings → Tools → Files and tap Grant.")
-            FileTools(rootDir()).run(op, a)
+            val gatesRaw = prefs.getString("file_gates", "[]") ?: "[]"
+            val gatesArr = try { JSONArray(gatesRaw) } catch (_: Exception) { JSONArray() }
+            val gates = (0 until gatesArr.length()).mapNotNull {
+                gatesArr.optString(it)?.trim()?.takeIf { s -> s.isNotEmpty() }
+            }
+            FileTools(rootDir(), gates).run(op, a)
         }
     }
 
@@ -611,26 +768,38 @@ class MainActivity : Activity() {
         @JavascriptInterface
         fun info(): String {
             memory?.checkEmbedding()
-            val embPresent = embModel.exists()
             val m = modelFile()
-            val external = prefs.getString("model_path", null)
+            val coder = coderModelFile()
+            val emb = embModelFile()
+            val modelExt = !prefs.getString("model_path", null).isNullOrBlank() && m.isFile && m.path == File(prefs.getString("model_path", "")!!).path
+            val coderExt = !prefs.getString("coder_path", null).isNullOrBlank() && coder.isFile
+            val embExt = !prefs.getString("emb_path", null).isNullOrBlank() && emb.isFile
             return JSONObject()
                 .put("files", filesOk())
                 .put("root", rootDir().path)
                 .put("base", base())
+                .put("models_dir", modelsDir().path)
                 .put("srv", try { JSONObject(prefs.getString("srv", "{}") ?: "{}") } catch (_: Exception) { JSONObject() })
                 .put("srv_coder", try { JSONObject(prefs.getString("srv_coder", "{}") ?: "{}") } catch (_: Exception) { JSONObject() })
                 .put("embed", embReady || (memory?.embOnline == true))
-                .put("embed_model", embPresent)
-                .put("emb_name", prefs.getString("emb_name", null))
-                .put("coder_model", coderModel.exists())
-                .put("coder_name", prefs.getString("coder_name", null))
+                .put("embed_model", emb.isFile)
+                .put("emb_name", prefs.getString("emb_name", null) ?: emb.name)
+                .put("emb_path", if (emb.isFile) emb.path else null)
+                .put("emb_external", embExt)
+                .put("coder_model", coder.isFile)
+                .put("coder_name", prefs.getString("coder_name", null) ?: coder.name)
+                .put("coder_path", if (coder.isFile) coder.path else null)
+                .put("coder_external", coderExt)
                 .put("active_slot", activeSlot)
                 .put("model_present", m.isFile)
                 .put("model_name", prefs.getString("model_name", null) ?: m.name)
                 .put("model_path", m.path)
-                .put("model_external", !external.isNullOrBlank() && File(external).canRead())
+                .put("model_external", modelExt || (!prefs.getString("model_path", null).isNullOrBlank() && m.canRead()))
                 .put("server_ready", llama?.ready == true)
+                .put("ocr_path", prefs.getString("ocr_path", null))
+                .put("ocr_name", prefs.getString("ocr_name", null))
+                .put("image_path", prefs.getString("image_path", null))
+                .put("image_name", prefs.getString("image_name", null))
                 .toString()
         }
 

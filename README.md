@@ -81,3 +81,10 @@ survive leaving the app or system reclaiming the Activity.
 - **Signature**: draw on pad → PNG stamp on page (save to persist).
 - **OCR**: optional ML Kit text recognition (`com.google.mlkit:text-recognition`) for scans and images.
 - pdf.js / pdf-lib load from CDN on first open (network once).
+
+## Recent (this build)
+
+- **Optional OCR model path** — Bind a GGUF to the OCR slot from Models folder; AI Fill still falls back to on-device ML Kit until a vision/OCR engine is wired. Path is recorded and shown in Settings.
+- **Power user: models by file type** — Map extensions (e.g. `.py`) to specialized no-copy GGUFs. Monaco AI edit chains soft-swap to that model when Power user is on.
+- **Syntax check by file type** — Editor validates JSON, JS, TS, HTML/XML, Python (brackets + indent + triple-quotes), Kotlin/Java/C-family, CSS, YAML with language-appropriate rules.
+- **OCR layout reconstruction** — After OCR, line boxes are clustered into rows/columns; markdown tables and structured layout are cached on the PDF object and fed into AI Fill.

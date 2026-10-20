@@ -302,6 +302,41 @@ textarea.in{height:auto;min-height:64px;padding:9px 12px;font:13px/19px var(--mo
 .main.hidden-for-ed{visibility:hidden;pointer-events:none}
 .row.ed-nav.on{background:var(--bg-hover);color:var(--fg)}
 
+/* ===== File Viewer (Material Files-inspired) ===== */
+#fv-view{display:none;position:fixed;inset:0;z-index:45;background:var(--bg);flex-direction:column}
+#fv-view.open{display:flex}
+#fv-header{height:48px;padding:0 8px;display:flex;align-items:center;gap:6px;background:var(--bg-sidebar);border-bottom:1px solid var(--line);flex:none}
+#fv-header .path{flex:1;min-width:0;font-size:13px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--fg)}
+#fv-toolbar{display:flex;gap:4px;padding:6px 10px;border-bottom:1px solid var(--line);background:var(--bg-subtle);flex:none;overflow-x:auto}
+#fv-toolbar .fbtn{height:32px;padding:0 12px;border-radius:8px;font-size:12px;font-weight:500;color:var(--fg-2);border:1px solid var(--line);background:var(--bg-elevated);white-space:nowrap}
+#fv-toolbar .fbtn:active{background:var(--bg-hover)}
+#fv-toolbar .fbtn.danger{color:var(--danger)}
+#fv-list{flex:1;overflow-y:auto;padding:6px 8px;padding-bottom:calc(12px + env(safe-area-inset-bottom))}
+.fv-row{display:flex;align-items:center;gap:12px;padding:11px 10px;border-radius:10px;cursor:pointer;font-size:14px}
+.fv-row:active{background:var(--bg-hover)}
+.fv-row .ico{width:36px;height:36px;border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:18px;background:var(--bg-well);flex:none}
+.fv-row .ico.dir{background:rgba(59,130,246,.12)}
+.fv-row .name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.fv-row .meta{font-size:11px;color:var(--fg-3);flex:none}
+.fv-row.gate-blocked .name{opacity:.55}
+.fv-row .gate-badge{font-size:10px;padding:2px 6px;border-radius:999px;background:var(--bg-well);color:var(--fg-3);margin-left:4px}
+.fv-row .gate-badge.blocked{background:rgba(220,38,38,.12);color:var(--danger)}
+.fv-empty{padding:40px 20px;text-align:center;color:var(--fg-3);font-size:14px}
+.fv-preview{display:none;position:fixed;inset:0;z-index:52;background:var(--bg);flex-direction:column}
+.fv-preview.open{display:flex}
+.fv-preview pre{flex:1;overflow:auto;margin:0;padding:12px;font:12px/1.45 var(--mono);white-space:pre-wrap;word-break:break-word}
+.fv-sheet{position:fixed;left:0;right:0;bottom:0;max-height:60dvh;background:var(--bg-sidebar);border-top:1px solid var(--line);border-radius:16px 16px 0 0;z-index:53;transform:translateY(100%);transition:transform .25s;padding:12px 16px calc(16px + env(safe-area-inset-bottom));box-shadow:0 -12px 40px rgba(0,0,0,.4)}
+.fv-sheet.open{transform:none}
+.fv-sheet h4{margin:0 0 8px;font-size:15px}
+.fv-sheet .actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}
+.mem-item{display:flex;flex-direction:column;gap:4px;padding:12px;border:1px solid var(--line);border-radius:12px;margin-bottom:8px;background:var(--bg-elevated)}
+.mem-item .tag{font-size:11px;font-weight:600;color:var(--fg-3);letter-spacing:.04em}
+.mem-item .body{font-size:14px;line-height:1.4}
+.mem-item .ops{display:flex;gap:8px;margin-top:6px}
+.mem-item .ops button{font-size:12px;height:28px;padding:0 10px;border-radius:8px;border:1px solid var(--line);background:var(--bg-well);color:var(--fg-2)}
+.mem-item .ops button.danger{color:var(--danger)}
+.mem-empty{padding:20px;text-align:center;color:var(--fg-3);font-size:13px}
+
 
 .kojot-logo {
   stroke: none;
@@ -358,9 +393,10 @@ textarea.in{height:auto;min-height:64px;padding:9px 12px;font:13px/19px var(--mo
   <div class="sb-head"><div class="brand">Kojot<small> · local agent</small></div><button class="ib mb" id="sbx" aria-label="Close"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>
   <div class="nav">
    <button class="row" id="nw"><svg viewBox="0 0 24 24"><path d="M12 20h9M16.5 3.5a2.1 2.1 0 013 3L7 19l-4 1 1-4z"/></svg>New chat</button>
-   <button class="row" id="st"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 00.3 1.8l.1.1a2 2 0 11-2.8 2.8l-.1-.1a1.7 1.7 0 00-1.8-.3 1.7 1.7 0 00-1 1.5V21a2 2 0 11-4 0v-.1a1.7 1.7 0 00-1.1-1.5 1.7 1.7 0 00-1.8.3l-.1.1a2 2 0 11-2.8-2.8l.1-.1a1.7 1.7 0 00.3-1.8 1.7 1.7 0 00-1.5-1H3a2 2 0 110-4h.1a1.7 1.7 0 001.5-1.1 1.7 1.7 0 00-.3-1.8l-.1-.1a2 2 0 112.8-2.8l.1.1a1.7 1.7 0 001.8.3H9a1.7 1.7 0 001-1.5V3a2 2 0 114 0v.1a1.7 1.7 0 001 1.5 1.7 1.7 0 001.8-.3l.1-.1a2 2 0 112.8 2.8l-.1.1a1.7 1.7 0 00-.3 1.8V9a1.7 1.7 0 001.5 1H21a2 2 0 110 4h-.1a1.7 1.7 0 00-1.5 1z"/></svg>Settings</button>
-   <button class="row ed-nav" id="ed-open"><svg viewBox="0 0 24 24"><path d="M4 5h16v3H4zM4 11h10v3H4zM4 17h14v3H4z"/></svg>Code Editor</button>
+   <button class="row" id="fv-open"><svg viewBox="0 0 24 24"><path d="M3 7a1 1 0 011-1h5l2 2h9a1 1 0 011 1v9a1 1 0 01-1 1H4a1 1 0 01-1-1V7z"/><path d="M8 13h8M8 16h5"/></svg>File Viewer</button>
    <button class="row" id="pdf-open"><svg viewBox="0 0 24 24"><path d="M14 3H7a2 2 0 00-2 2v14a2 2 0 002 2h10a2 2 0 002-2V8zM14 3v5h5"/><path d="M9 13h6M9 17h4"/></svg>PDF Forms</button>
+   <button class="row ed-nav" id="ed-open"><svg viewBox="0 0 24 24"><path d="M4 5h16v3H4zM4 11h10v3H4zM4 17h14v3H4z"/></svg>Code Editor</button>
+   <button class="row" id="st"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 00.3 1.8l.1.1a2 2 0 11-2.8 2.8l-.1-.1a1.7 1.7 0 00-1.8-.3 1.7 1.7 0 00-1 1.5V21a2 2 0 11-4 0v-.1a1.7 1.7 0 00-1.1-1.5 1.7 1.7 0 00-1.8.3l-.1.1a2 2 0 11-2.8-2.8l.1-.1a1.7 1.7 0 00.3-1.8 1.7 1.7 0 00-1.5-1H3a2 2 0 110-4h.1a1.7 1.7 0 001.5-1.1 1.7 1.7 0 00-.3-1.8l-.1-.1a2 2 0 112.8-2.8l.1.1a1.7 1.7 0 001.8.3H9a1.7 1.7 0 001-1.5V3a2 2 0 114 0v.1a1.7 1.7 0 001 1.5 1.7 1.7 0 001.8-.3l.1-.1a2 2 0 112.8 2.8l-.1.1a1.7 1.7 0 00-.3 1.8V9a1.7 1.7 0 001.5 1H21a2 2 0 110 4h-.1a1.7 1.7 0 00-1.5 1z"/></svg>Settings</button>
   </div>
   <div class="label">Chats</div><div class="hist" id="hist"></div>
   <div class="sb-card"><b>Local Intelligence</b>Runs entirely on your device via llama-server. Nothing leaves your phone.</div>
@@ -407,7 +443,7 @@ textarea.in{height:auto;min-height:64px;padding:9px 12px;font:13px/19px var(--mo
   <div id="pdf-canvas-wrap">
    <div id="pdf-empty">
     <b>PDF workspace</b>
-    <div class="hint">Open a fillable PDF from your workspace. Most of the screen is the document — tools live in the bar below.</div>
+    <div class="hint">Open any PDF — fillable forms, flat scans, or photos. OCR works without form fields. Tools live in the bar below.</div>
     <button class="btn sm go" id="pdf-empty-open" style="margin-top:4px">Open PDF</button>
    </div>
    <div id="pdf-pages" style="display:none"></div>
@@ -517,6 +553,37 @@ textarea.in{height:auto;min-height:64px;padding:9px 12px;font:13px/19px var(--mo
  <div class="fb-list" id="ed-fb-list"></div>
 </div>
 <div id="ed-toast"></div>
+
+<!-- ===== File Viewer ===== -->
+<div id="fv-view">
+ <div id="fv-header">
+  <button class="ib" id="fv-back" aria-label="Back"><svg viewBox="0 0 24 24"><path d="M15 6l-6 6 6 6"/></svg></button>
+  <div class="path" id="fv-path">.</div>
+  <button class="ib" id="fv-up" aria-label="Up" title="Parent folder"><svg viewBox="0 0 24 24"><path d="M12 19V5M5 12l7-7 7 7"/></svg></button>
+  <button class="ib" id="fv-x" aria-label="Close"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+ </div>
+ <div id="fv-toolbar">
+  <button class="fbtn" id="fv-refresh">Refresh</button>
+  <button class="fbtn" id="fv-mkdir">New folder</button>
+  <button class="fbtn" id="fv-sort">Sort: name</button>
+  <button class="fbtn" id="fv-gates">AI gates</button>
+ </div>
+ <div id="fv-list"></div>
+</div>
+<div class="fv-preview" id="fv-preview">
+ <div id="fv-header" style="flex:none">
+  <button class="ib" id="fv-prev-back" aria-label="Back"><svg viewBox="0 0 24 24"><path d="M15 6l-6 6 6 6"/></svg></button>
+  <div class="path" id="fv-prev-title">Preview</div>
+  <button class="ib" id="fv-prev-x" aria-label="Close"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+ </div>
+ <pre id="fv-prev-body"></pre>
+</div>
+<div class="fv-sheet" id="fv-sheet">
+ <h4 id="fv-sheet-title">Actions</h4>
+ <div id="fv-sheet-meta" style="font-size:12px;color:var(--fg-3)"></div>
+ <div class="actions" id="fv-sheet-actions"></div>
+</div>
+
 <script src="./vs/loader.js"></script>
 <div class="ss" id="ss"><div class="sheet s2">
  <div class="grab"></div>
@@ -527,7 +594,7 @@ textarea.in{height:auto;min-height:64px;padding:9px 12px;font:13px/19px var(--mo
 </div></div>
 <script>
 const $=s=>document.querySelector(s),LS=localStorage,J=JSON;
-const DEF={url:'http://127.0.0.1:8080',sys:'You are a helpful, concise assistant.',t:.7,m:1024,theme:'auto',power:false,thoughts:true,vision:false,coder_t:0.1,p_coder:{},srv_coder:{},xj_coder:'',files:true,ask:true,github:{token:'',repo:'420garbage420/kojot'},search:{on:true,prov:'tavily',keys:{},max:5,depth:'basic',sx:'',cu:'',cm:'GET',ch:'',cb:''},p:{},srv:{},xj:'',project:{name:'',conventions:''},profile:'balanced',auto_coder:true,tool_cache:true};
+const DEF={url:'http://127.0.0.1:8080',sys:'You are a helpful, concise assistant.',t:.7,m:1024,theme:'auto',power:false,thoughts:true,vision:false,coder_t:0.1,p_coder:{},srv_coder:{},xj_coder:'',files:true,ask:true,github:{token:'',repo:'420garbage420/kojot'},search:{on:true,prov:'tavily',keys:{},max:5,depth:'basic',sx:'',cu:'',cm:'GET',ch:'',cb:''},p:{},srv:{},xj:'',project:{name:'',conventions:''},profile:'balanced',auto_coder:true,tool_cache:true,mem_auto:true,file_gates:[],ocr_engine:'mlkit',ocr_path:'',ext_models:{}};
 const saved=(()=>{try{return J.parse(LS.getItem('lc.cfg')||'{}')}catch{return{}}})();
 const cfg={...DEF,...saved,search:{...DEF.search,...saved.search,keys:{...(saved.search||{}).keys}},p:{...saved.p},srv:{...saved.srv}};
 if(cfg.xj && (cfg.xj.includes('enable_thinking') || cfg.xj.includes('qwen')) && !cfg.xj_coder){
@@ -1499,6 +1566,8 @@ window.syncBack = function() {
   const active = !!(
     $('#editor-view')?.classList.contains('on') ||
     $('#pdf-view')?.classList.contains('on') ||
+    $('#fv-view')?.classList.contains('open') ||
+    $('#fv-preview')?.classList.contains('open') ||
     $('#ss')?.classList.contains('open') ||
     $('#sb')?.classList.contains('open') ||
     $('#ed-fbrowser')?.classList.contains('open') ||
@@ -1519,6 +1588,18 @@ window.__goBack = function() {
   }
   if ($('#ed-fbrowser')?.classList.contains('open')) {
     $('#ed-fbrowser').classList.remove('open');
+    syncBack(); return true;
+  }
+  if ($('#fv-preview')?.classList.contains('open')) {
+    $('#fv-preview').classList.remove('open');
+    syncBack(); return true;
+  }
+  if ($('#fv-sheet')?.classList.contains('open')) {
+    $('#fv-sheet').classList.remove('open');
+    syncBack(); return true;
+  }
+  if ($('#fv-view')?.classList.contains('open')) {
+    showFileViewer(false);
     syncBack(); return true;
   }
   if ($('#ed-find')?.classList.contains('open')) {
@@ -1644,11 +1725,23 @@ function paneTools(){return`<div class="pane" data-p="tool"><div class="sec">Pho
  </div>
  <div class="tst" id="vit-m" style="white-space:pre-wrap;font-family:var(--mono);font-size:12px;margin-top:6px"></div>
 
+ <div class="sec">Models folder (no copy)</div>
+ <div class="note" style="margin:0 0 8px">One GGUF on disk — <b>no second copy</b>. Default: <code>Download/Local Models</code> with subfolders <code>llm</code>, <code>embed</code>, <code>coder</code>, <code>image</code>, <code>ocr</code>, <code>decision</code>. OCR is optional: bind a GGUF to the <b>OCR</b> slot if you have a vision/OCR model; otherwise AI Fill falls back to on-device <b>ML Kit</b>.</div>
+ <div class="fi"><label>Models folder path</label>
+  <div class="r2"><input class="in" id="models-dir-in" autocapitalize="off" spellcheck="false" placeholder="/sdcard/Download/Local Models"><button class="btn sm" id="models-dir-set" style="margin:0">Set</button></div>
+ </div>
+ <div class="tst" id="models-dir-m"></div>
+ <div id="models-list" style="max-height:160px;overflow-y:auto;font-size:13px;margin:8px 0;padding:6px;background:var(--bg-well);border-radius:10px"></div>
+ <div class="r2" style="flex-wrap:wrap;gap:6px">
+  <button class="btn sm" id="models-refresh">Refresh list</button>
+  <button class="btn sm" id="main-pick">Pick file…</button>
+ </div>
+
  <div class="sec">Main Chat Model</div>
-<div class="set"><div class="lt"><span id="main-st">Chat Model</span><small id="main-s">tap to switch .gguf (no data wipe)</small></div><button class="btn sm" id="main-pick">Switch model</button></div>
-<div class="note" style="margin:4px 0 8px">Switching keeps chats, memory and settings. If the file lives on shared storage we use it in-place (no multi-GB copy).</div>
+<div class="set"><div class="lt"><span id="main-st">Chat Model</span><small id="main-s">no copy · external path preferred</small></div></div>
+<div class="note" style="margin:4px 0 8px">Unbind removes the app’s pointer only — your file in the models folder is never deleted. If App Info still shows ~10GB, tap Unbind, delete any leftover <code>model.gguf</code> under app storage by unbinding all slots, then bind again from the list above.</div>
 <div class="r2" style="margin-top:4px;gap:8px">
-  <button class="btn sm dng" id="main-del" style="display:none">Remove Model</button>
+  <button class="btn sm dng" id="main-del" style="display:none">Unbind model</button>
 </div>
 <div class="tst" id="main-m"></div>
 
@@ -1695,6 +1788,21 @@ function paneTools(){return`<div class="pane" data-p="tool"><div class="sec">Pho
  </div>
 <div class="tst" id="coder-m"></div>
 
+ <div class="sec" id="ext-models-sec">Models by file type <span style="font-weight:400;color:var(--fg-3)">(power user)</span></div>
+ <div class="note" style="margin:0 0 8px" id="ext-models-note">When Power user is on and models stay on-disk (no copy), map extensions to specialized GGUFs for the code editor AI path. Example: <code>.py</code> → a Python fine-tune. Leave blank to use the Coder model. OCR slot is separate (optional; falls back to ML Kit).</div>
+ <div id="ext-models-list" style="display:flex;flex-direction:column;gap:6px;margin-bottom:8px"></div>
+ <div class="r2" style="gap:6px;flex-wrap:wrap">
+  <input class="in" id="ext-m-ext" placeholder=".py" style="max-width:90px" autocapitalize="off" spellcheck="false">
+  <input class="in" id="ext-m-path" placeholder="path to .gguf (from models folder)" style="flex:1" autocapitalize="off" spellcheck="false">
+  <button class="btn sm" id="ext-m-add">Add</button>
+ </div>
+ <div class="tst" id="ext-m-msg"></div>
+
+ <div class="sec">OCR engine</div>
+ <div class="note" style="margin:0 0 8px">Default is on-device <b>ML Kit</b> (no GGUF). Bind a model with the OCR button in the list above to record an optional OCR path for a future vision engine; until then AI Fill always falls back to ML Kit.</div>
+ <div class="set"><div class="lt"><span id="ocr-st">OCR path (optional)</span><small id="ocr-s">not set · using ML Kit</small></div></div>
+ <div class="tst" id="ocr-m"></div>
+
  <div class="sec">GitHub Integration</div>
  <div class="fi"><label>Personal Access Token (classic with repo scope)</label><input class="in" type="password" data-k="github.token" data-t="str" placeholder="ghp_..."></div>
  <div class="fi"><label>Default Repository (owner/repo)</label><input class="in" data-k="github.repo" data-t="str" placeholder="420garbage420/kojot"></div>
@@ -1726,13 +1834,32 @@ function fillPower(){
     e.value = v == null ? '' : String(v);
   });
 }
-function tabsHTML(){return[['gen','General'],['tool','Tools'],...(cfg.power?[['pow','Power']]:[])].map(([k,n])=>`<button data-tab="${k}" class="${k===curTab?'on':''}">${n}</button>`).join('')}
-function buildSettings(){$('#s-body').innerHTML=paneGen()+paneTools()+powerHTML();fill();showTab(curTab);$('#s-tabs').innerHTML=tabsHTML();
+function tabsHTML(){return[['gen','General'],['tool','Tools'],['mem','Memory'],...(cfg.power?[['pow','Power']]:[])].map(([k,n])=>`<button data-tab="${k}" class="${k===curTab?'on':''}">${n}</button>`).join('')}
+function paneMemory(){
+  return `<div class="pane" data-p="mem">
+ <div class="sec">User Memories</div>
+ <div class="note" style="margin:0 0 10px">Claude-style topics the agent keeps about you. Injected as context on new turns. Edit or delete anytime — changes apply immediately.</div>
+ ${sw('mem_auto','Generate from chats','When on, the model may save_fact durable preferences it learns')}
+ <div class="r2" style="margin:8px 0;flex-wrap:wrap">
+  <button class="btn sm" id="mem-reload">Refresh list</button>
+  <button class="btn sm" id="mem-add">Add memory</button>
+  <button class="btn sm" id="mem-clear-all" style="color:var(--danger)">Reset all</button>
+ </div>
+ <div id="mem-list" class="mem-empty">Loading…</div>
+ <div class="sec" style="margin-top:16px">AI permission gates</div>
+ <div class="note" style="margin:0 0 8px">Block the agent from reading or writing specific paths (relative to workspace). Useful for secrets, photos, or system folders.</div>
+ <div class="fi"><label>Blocked paths (one per line)</label>
+  <textarea class="in" id="gate-paths" rows="5" spellcheck="false" placeholder=".ssh&#10;Photos&#10;private/keys.json"></textarea>
+ </div>
+ <button class="btn sm" id="gate-save">Save gates</button>
+ <div class="tst" id="gate-m"></div>
+</div>`}
+function buildSettings(){$('#s-body').innerHTML=paneGen()+paneTools()+paneMemory()+powerHTML();fill();showTab(curTab);$('#s-tabs').innerHTML=tabsHTML();loadMemoriesUI();loadGatesUI();
   if($('#proj-name'))$('#proj-name').value=(cfg.project&&cfg.project.name)||'';
   if($('#proj-conv'))$('#proj-conv').value=(cfg.project&&cfg.project.conventions)||'';
   document.querySelectorAll('#prof-seg [data-prof]').forEach(x=>x.classList.toggle('on',x.dataset.prof===(cfg.profile||'balanced')));
 }
-function showTab(t){if(t==='pow'&&!cfg.power)t='gen';curTab=t;document.querySelectorAll('#s-body .pane').forEach(p=>p.classList.toggle('on',p.dataset.p===t));document.querySelectorAll('#s-tabs button').forEach(b=>b.classList.toggle('on',b.dataset.tab===t));$('#s-body').scrollTop=0}
+function showTab(t){if(t==='pow'&&!cfg.power)t='gen';curTab=t;document.querySelectorAll('#s-body .pane').forEach(p=>p.classList.toggle('on',p.dataset.p===t));document.querySelectorAll('#s-tabs button').forEach(b=>b.classList.toggle('on',b.dataset.tab===t));$('#s-body').scrollTop=0;if(t==='mem')loadMemoriesUI()}
 function fill(){document.querySelectorAll('#s-body [data-k]').forEach(e=>{const v=getPath(cfg,e.dataset.k);e.value=v==null?'':String(v)});document.querySelectorAll('#s-body [data-sw]').forEach(b=>b.setAttribute('aria-checked',!!getPath(cfg,b.dataset.sw)));segs();lab();provVis();filesUI()}
 const segs=()=>document.querySelectorAll('#s-body [data-seg]').forEach(s=>{const v=getPath(cfg,s.dataset.seg);s.querySelectorAll('button').forEach(b=>b.classList.toggle('on',b.dataset.v===v))});
 const lab=()=>{const a=$('[data-o=t]'),b=$('[data-o=m]');if(a)a.textContent=(+cfg.t).toFixed(2);if(b)b.textContent=cfg.m};
@@ -1801,10 +1928,12 @@ if(!$('#fs-t'))return;ninfo();const ok=NI&&NI.files;$('#fs-t').textContent=!NI?'
     } else {
       $('#main-st').textContent = 'Chat Model';
       $('#main-st').style.color = 'var(--fg)';
-      $('#main-s').textContent = 'Not installed — tap Switch model';
+      $('#main-s').textContent = 'Not bound — pick from Models folder list';
       if ($('#main-del')) $('#main-del').style.display = 'none';
     }
   }
+  if ($('#models-dir-in') && NI && NI.models_dir) $('#models-dir-in').value = NI.models_dir;
+  refreshModelsList();
   ninfo();
   if (NI && NI.coder_model) {
     $('#coder-s').textContent = 'Installed · Ready for Monaco';
@@ -2102,7 +2231,7 @@ const PDF = {
 
   fieldsHTML(){
     if(!this.fields.length)
-      return '<div class="note" style="padding:16px;color:var(--fg-3);line-height:1.45">No fillable AcroForm fields in this PDF. You can still OCR scanned pages, stamp a signature, or use AI for guidance — but typed form fill needs a fillable PDF.</div>';
+      return '<div class="note" style="padding:16px;color:var(--fg-3);line-height:1.45"><b>No AcroForm fields</b> — this is normal for scans and flat PDFs. Use <b>OCR</b> to read text, <b>Text</b>/<b>Sign</b> to write on the page, or <b>AI Fill</b> (OCR layout → stamp). Form-field fill only applies when the PDF was built with fillable fields.</div>';
     return this.fields.map((f,i)=>{
       if(f.checked!==null){
         return `<div class="pdf-field"><label><input type="checkbox" data-fi="${i}" ${f.checked?'checked':''}> ${esc(f.name)}</label></div>`;
@@ -2240,10 +2369,10 @@ const PDF = {
 
   showAiSheet(){
     const nFields = (this.fields||[]).length;
-    const html = `<p style="font-size:12px;color:var(--fg-3);margin:0 0 10px;line-height:1.4">Uses your <b>local</b> model. Fillable PDFs use form fields; flat/scanned PDFs use OCR positions then stamp text.</p>
-<textarea id="pdf-ai-in" placeholder="e.g. Name Jane Doe, date today, check Agree to terms" style="width:100%;min-height:88px;background:var(--bg);border:1px solid var(--line);color:var(--fg);font-size:14px;padding:10px 12px;border-radius:10px;resize:vertical"></textarea>
-<button type="button" id="pdf-ai-run" style="width:100%;margin-top:10px;padding:12px;border-radius:12px;border:0;background:var(--accent);color:var(--on-accent);font-weight:600;font-size:14px;cursor:pointer">Fill with local model${nFields?'' : ' (no fields yet)'}</button>
-<div id="pdf-ai-status" style="font-size:11px;color:var(--fg-3);margin-top:8px;font-family:var(--mono)">${nFields? nFields+' fields detected':'No AcroForm fields — open a fillable PDF first'}</div>`;
+    const html = `<p style="font-size:12px;color:var(--fg-3);margin:0 0 10px;line-height:1.4">Uses your <b>main chat model</b> on-device. <b>Fillable</b> PDFs → form fields. <b>Scans / flat PDFs</b> → OCR (optional GGUF path if bound, otherwise <b>ML Kit</b>) for layout + table reconstruction, then the model stamps text. OCR GGUF is optional.</p>
+<textarea id="pdf-ai-in" placeholder="e.g. Name Jane Doe, SSN 123-45-6789, date today, check Agree" style="width:100%;min-height:88px;background:var(--bg);border:1px solid var(--line);color:var(--fg);font-size:14px;padding:10px 12px;border-radius:10px;resize:vertical"></textarea>
+<button type="button" id="pdf-ai-run" style="width:100%;margin-top:10px;padding:12px;border-radius:12px;border:0;background:var(--accent);color:var(--on-accent);font-weight:600;font-size:14px;cursor:pointer">${nFields?'Fill form fields':'OCR + AI stamp (non-form)'}</button>
+<div id="pdf-ai-status" style="font-size:11px;color:var(--fg-3);margin-top:8px;font-family:var(--mono)">${nFields? nFields+' AcroForm fields':'No form fields — will OCR pages then place stamps'}</div>`;
     this.openSheet('AI Fill', html);
   },
   async runAiFillFromUi(){
@@ -2312,25 +2441,55 @@ const PDF = {
       this.dirty=true;
       return n;
     }
-    // Path B: flat / scanned PDF — OCR layout → model → stamp text at PDF coordinates
+    // Path B: flat / scanned PDF — OCR (ML Kit) → main model → stamp text at PDF coordinates
     if(!this.path) throw Error('No PDF open');
-    this.toast('OCR layout…');
-    const ocr = J.parse(await nat('ocr_pdf',{path:this.path, max_pages:6}));
+    this.toast('OCR layout (on-device)…');
+    let ocr;
+    try{
+      ocr = J.parse(await nat('ocr_pdf',{path:this.path, max_pages:8}));
+    }catch(e){
+      throw Error('OCR failed: '+(e.message||e)+'. ML Kit must be available (Play services). Scans cannot use AcroForm fill.');
+    }
     const data = ocr.data || {};
-    const anchors = (data.anchors || []).slice(0, 40);
-    const lines = (data.lines || []).slice(0, 80).map(l=>({
+    // Cache OCR context on the PDF object for later reconstruct / follow-up fills
+    this._ocrCache = {ts:Date.now(), path:this.path, text:ocr.text||'', data};
+    let anchors = (data.anchors || []).slice(0, 40);
+    const lines = (data.lines || []).slice(0, 120).map(l=>({
       page:l.page, text:l.text,
       x:l.box&&l.box.x, y:l.box&&l.box.y, w:l.box&&l.box.w, h:l.box&&l.box.h
     }));
-    if(!anchors.length && !lines.length) throw Error('OCR found no text — cannot place fills');
-    const sys = `You fill a non-interactive PDF by placing text at coordinates.
+    // Reconstruct tables / multi-column layout from line geometry (uses cached boxes)
+    const layout = reconstructOcrLayout({text:ocr.text, lines:data.lines||[]});
+    this._ocrCache.layout = layout;
+    // If ML Kit returned text but no label anchors, synthesize blanks to the right of short lines
+    if(!anchors.length && lines.length){
+      anchors = lines.filter(l=>l.text && l.text.length<48 && l.x!=null).slice(0,30).map(l=>({
+        label:(l.text||'').replace(/:$/,'').trim(),
+        page:l.page||1,
+        x:(l.x||0)+(l.w||80)+8,
+        y:l.y||100,
+        size:Math.max(10, Math.min(14, (l.h||12))),
+        hint:'right_of_line'
+      }));
+    }
+    if(!anchors.length && !lines.length){
+      const hint=(ocr.text||'').trim().slice(0,200);
+      throw Error('OCR found no text/layout'+(hint?': '+hint:'')+' — try a clearer scan or higher-res PDF');
+    }
+    const sys = `You fill a non-interactive (scanned/flat) PDF by placing text at coordinates.
 Coordinates are PDF user space: origin bottom-left, units points, y increases upward.
-Prefer "anchors" (suggested blanks to the right of labels). Only use line boxes if needed.
+Prefer "anchors" (suggested blanks). You may place relative to OCR line boxes.
+When TABLES are present, treat cells as labeled fields when the instruction mentions them.
 Output ONLY JSON:
 {"stamps":[{"page":1,"x":120.5,"y":400.2,"text":"Jane Doe","size":12}, ...]}
-page is 1-based. Do not invent values the user did not provide. Skip unknown fields.`;
-    const user = 'INSTRUCTION:\n'+instruction+'\n\nANCHORS (preferred fill positions):\n'+JSON.stringify(anchors)+'\n\nOCR LINES (context):\n'+JSON.stringify(lines);
-    const parsed = await this.chatJson(sys, user, 1200);
+page is 1-based. Only use values from the user instruction. Skip unknown fields.`;
+    const tableHint = (layout.tables&&layout.tables.length)
+      ? '\n\nRECONSTRUCTED TABLES (from OCR geometry):\n'+layout.tables.map(t=>t.markdown).join('\n\n')
+      : '';
+    const structHint = layout.structured ? '\n\nSTRUCTURED LAYOUT:\n'+layout.structured.slice(0,2500) : '';
+    const user = 'INSTRUCTION:\n'+instruction+'\n\nANCHORS:\n'+JSON.stringify(anchors)+'\n\nOCR LINES:\n'+JSON.stringify(lines.slice(0,60))+tableHint+structHint;
+    if($('#pdf-ai-status')) $('#pdf-ai-status').textContent='OCR ok · calling main model…';
+    const parsed = await this.chatJson(sys, user, 1400);
     const stamps = parsed.stamps || parsed.placements || [];
     let n=0;
     for(const s of stamps){
@@ -2342,7 +2501,7 @@ page is 1-based. Do not invent values the user did not provide. Skip unknown fie
       await this.stampText(String(s.text), pageIndex, x, y, size);
       n++;
     }
-    if(!n) throw Error('Model returned no placeable stamps — try clearer instructions');
+    if(!n) throw Error('Model returned no placeable stamps — try: "Name: Jane Doe" style instructions matching labels OCR saw');
     this.dirty=true;
     return n;
   },
@@ -2496,7 +2655,17 @@ $('#pdf-btn-ocr')?.addEventListener('click',async()=>{
   try{
     PDF.toast('OCR running on device…');
     const r=J.parse(await nat('ocr_pdf',{path:PDF.path,max_pages:6}));
-    const body = '<p style="font-size:12px;color:var(--fg-3);margin:0 0 10px;line-height:1.4">OCR reads <b>any</b> PDF (scans, photos, flat files). It does not need AcroForm fields. Use <b>Text</b> / <b>Sign</b> to write onto non-fillable pages, then Save.</p><pre style="white-space:pre-wrap;font-size:12px;line-height:1.4;margin:0">'
+    const data=r.data||{};
+    const layout=reconstructOcrLayout({text:r.text, lines:data.lines||[]});
+    PDF._ocrCache={ts:Date.now(), path:PDF.path, text:r.text||'', data, layout};
+    let extra='';
+    if(layout.tables&&layout.tables.length){
+      extra='<div style="margin:10px 0 6px;font-size:12px;color:var(--fg-2)"><b>Reconstructed tables</b> (from OCR geometry)</div>'
+        +layout.tables.map(t=>'<pre style="white-space:pre-wrap;font-size:11px;line-height:1.35;margin:0 0 8px;padding:8px;background:var(--bg-well);border-radius:8px">'+esc(t.markdown)+'</pre>').join('');
+    }
+    const body = '<p style="font-size:12px;color:var(--fg-3);margin:0 0 10px;line-height:1.4">OCR reads <b>any</b> PDF (scans, photos, flat files). Engine: <b>ML Kit</b>'+(cfg.ocr_path?' (optional OCR GGUF path recorded, not active yet)':'')+'. Layout cache stored for AI Fill.</p>'
+      +extra
+      +'<pre style="white-space:pre-wrap;font-size:12px;line-height:1.4;margin:0">'
       +esc((r.text||'').slice(0,4000))+'</pre>';
     PDF.openSheet('OCR result', body);
   }catch(e){ PDF.toast(String(e.message||e), true); }
@@ -2622,7 +2791,7 @@ $('#s-body').addEventListener('input',e=>{const el=e.target.closest('[data-k]');
  }
  setPath(cfg,effKey,v);if(key==='t'||key==='m')lab();saveCfg()});
 $('#s-body').addEventListener('click',async e=>{const t=e.target;let b;
- if(b=t.closest('[data-sw]')){const k=b.dataset.sw,v=!getPath(cfg,k);setPath(cfg,k,v);b.setAttribute('aria-checked',v);saveCfg();if(k==='power'){$('#s-tabs').innerHTML=tabsHTML();if(v)$('#s-tabs [data-tab=pow]').classList.add('nw');else if(curTab==='pow')showTab('gen')}return}
+ if(b=t.closest('[data-sw]')){const k=b.dataset.sw,v=!getPath(cfg,k);setPath(cfg,k,v);b.setAttribute('aria-checked',v);saveCfg();if(k==='power'){$('#s-tabs').innerHTML=tabsHTML();if(v)$('#s-tabs [data-tab=pow]').classList.add('nw');else if(curTab==='pow')showTab('gen');fillExtModels();syncOcrUI()}return}
  if(b=t.closest('[data-seg] button')){setPath(cfg,b.parentNode.dataset.seg,b.dataset.v);segs();saveCfg();if(b.parentNode.dataset.seg==='theme')theme();provVis();return}
  if(b=t.closest('[data-r]')){setRoot(b.dataset.r);return}
  if(t.closest('#rt-s'))return setRoot($('#rt').value.trim());
@@ -2701,11 +2870,45 @@ $('#s-body').addEventListener('click',async e=>{const t=e.target;let b;
    return;
  }
  if(t.closest('#main-pick')){
-   try{ await nat('pick_model', {}); ninfo(); }catch(x){ alert(x.message); }
+   try{ await nat('pick_model', {}); ninfo(); filesUI(); }catch(x){ alert(x.message); }
    return}
  if(t.closest('#main-del')){
-   if(!confirm('Remove the main chat model file? Chats, memory and settings are kept. You can pick another model afterwards.')) return;
-   try{ await nat('delete_model',{}); ninfo(); alert('Main model removed. Pick a new one to continue.'); }catch(x){ alert(x.message); }
+   if(!confirm('Unbind main chat model? Your .gguf in the models folder is NOT deleted. Chats and memory stay.')) return;
+   try{ await nat('delete_model',{}); ninfo(); filesUI(); alert('Main model unbound. Bind another from the list.'); }catch(x){ alert(x.message); }
+   return}
+ if(t.closest('#models-dir-set')){
+   const p=($('#models-dir-in')?.value||'').trim();
+   try{ const r=JSON.parse(await nat('set_models_dir',{path:p})); const m=$('#models-dir-m'); if(m){m.style.color='var(--success)';m.textContent=r.path||r.text;} ninfo(); filesUI(); }catch(x){ const m=$('#models-dir-m'); if(m){m.style.color='var(--danger)';m.textContent=x.message;} }
+   return}
+ if(t.closest('#models-refresh')){ refreshModelsList(); return }
+ if(t.closest('[data-bind-model]')){
+   const b=t.closest('[data-bind-model]');
+   const path=b.dataset.path, slot=b.dataset.bindModel;
+   try{
+     await nat('select_model',{path, slot});
+     if(slot==='ocr'){ cfg.ocr_path=path; cfg.ocr_engine='mlkit'; saveCfg(); }
+     ninfo(); filesUI(); fillExtModels(); syncOcrUI();
+     const note = (slot==='ocr'||slot==='image') ? ' (path reserved; OCR still uses ML Kit until a vision engine is wired)' : ' (no copy)';
+     alert('Bound '+slot+' → '+path.split('/').pop()+note);
+   }catch(x){ alert(x.message); }
+   return}
+ if(t.closest('#ext-m-add')){
+   let ext=($('#ext-m-ext')?.value||'').trim().toLowerCase();
+   const path=($('#ext-m-path')?.value||'').trim();
+   const m=$('#ext-m-msg');
+   if(!ext||!path){ if(m){m.style.color='var(--danger)';m.textContent='Need extension and path';} return}
+   if(ext[0]!=='.') ext='.'+ext;
+   cfg.ext_models=cfg.ext_models||{};
+   cfg.ext_models[ext]=path;
+   saveCfg(); fillExtModels();
+   if($('#ext-m-ext')) $('#ext-m-ext').value='';
+   if($('#ext-m-path')) $('#ext-m-path').value='';
+   if(m){m.style.color='var(--success)';m.textContent='Mapped '+ext+' → '+path.split('/').pop();}
+   return}
+ if(t.closest('[data-ext-del]')){
+   const ext=t.closest('[data-ext-del]').dataset.extDel;
+   if(cfg.ext_models) delete cfg.ext_models[ext];
+   saveCfg(); fillExtModels();
    return}
  if(t.closest('#proj-save')){
    cfg.project=cfg.project||{};
@@ -2731,17 +2934,17 @@ $('#s-body').addEventListener('click',async e=>{const t=e.target;let b;
  if(b = t.closest('#pow-target button')){
    powTarget = b.dataset.target;
    $('#pow-target').querySelectorAll('button').forEach(btn => btn.classList.toggle('on', btn === b));
-   fillPower();
+   fillPower();fillExtModels();syncOcrUI();
    return;
  }
  if(t.closest('#coder-del')){
-   if(!confirm('Delete coder model file and reclaim storage?')) return;
-   try{ await nat('delete_coder',{}); ninfo(); filesUI(); alert('Coder model removed.'); }catch(x){ alert(x.message); }
+   if(!confirm('Unbind coder model? The .gguf in your models folder is kept.')) return;
+   try{ await nat('delete_coder',{}); ninfo(); filesUI(); alert('Coder unbound.'); }catch(x){ alert(x.message); }
    return;
  }
  if(t.closest('#mem-emb-del')){
-   if(!confirm('Delete embedding model file?')) return;
-   try{ await nat('delete_emb',{}); ninfo(); filesUI(); alert('Embedding model removed.'); }catch(x){ alert(x.message); }
+   if(!confirm('Unbind embedding model? The .gguf in your models folder is kept.')) return;
+   try{ await nat('delete_emb',{}); ninfo(); filesUI(); alert('Embedding unbound.'); }catch(x){ alert(x.message); }
    return;
  }
  if(t.closest('#coder-save')){
@@ -2798,7 +3001,7 @@ $('#s-body').addEventListener('click',async e=>{const t=e.target;let b;
  if(t.closest('#ws-test')){const m=$('#ws-m');m.style.color='var(--fg-2)';m.textContent='Searching…';try{const r=await webSearch('latest news',3);m.style.color='var(--success)';m.textContent=`Works — ${r.data.results.length} results via ${r.data.prov}.`}catch(x){m.style.color='var(--danger)';m.textContent=x.message}return}
  if(t.closest('#p-info')){const m=$('#srvinfo');m.textContent='Reading…';try{const p=await(await fetch(cfg.url.replace(/\/$/,'')+'/props')).json(),g=p.default_generation_settings||{};m.style.color='var(--fg-2)';m.textContent=`ctx ${g.n_ctx||'?'} · slots ${p.total_slots||'?'} · ${(p.model_path||'').split('/').pop()||'model'} · ${p.build_info||''}`}catch{m.style.color='var(--danger)';m.textContent='Could not read /props.'}return}
  if(t.closest('#p-apply')){saveCfg();try{await nat('restart',{srv:cfg.srv});done()}catch(x){$('#srvinfo').style.color='var(--danger)';$('#srvinfo').textContent=x.message}return}
- if(t.closest('#p-reset')){if(powTarget==='coder'){cfg.p_coder={};cfg.srv_coder={};cfg.xj_coder='';}else{cfg.p={};cfg.srv={};cfg.xj='';}saveCfg();fillPower();}});
+ if(t.closest('#p-reset')){if(powTarget==='coder'){cfg.p_coder={};cfg.srv_coder={};cfg.xj_coder='';}else{cfg.p={};cfg.srv={};cfg.xj='';}saveCfg();fillPower();fillExtModels();syncOcrUI();}});
 async function setRoot(p){const m=$('#rt-m');try{await nat('setroot',{path:p});ninfo();filesUI();m.style.color='var(--success)';m.textContent='Workspace set.'}catch(x){m.style.color='var(--danger)';m.textContent=x.message}}
 $('#s-tabs').addEventListener('click',e=>{const b=e.target.closest('[data-tab]');if(b)showTab(b.dataset.tab)});
 
@@ -2853,7 +3056,7 @@ let ed=null, edFile='untitled.html', edDirty=false, edWrap=true, edPath='.', edC
 let edSteps=[''], edIdx=0, edBackup=null, edDecos=[], edManual=false, edHist=[], edHistN=0;
 const edBuzz=()=>{if(navigator.vibrate)navigator.vibrate(10)};
 function edToast(msg,kind,ms){kind=kind||'info';ms=ms||2200;const stack=$('#ed-toast');const el=document.createElement('div');el.className='t'+(kind==='error'?' err':kind==='ok'?' ok':'');el.textContent=msg;stack.appendChild(el);requestAnimationFrame(()=>el.classList.add('show'));setTimeout(()=>{el.classList.remove('show');setTimeout(()=>el.remove(),220)},ms)}
-function edLang(name){const e=(name.split('.').pop()||'').toLowerCase();return({html:'html',htm:'html',js:'javascript',mjs:'javascript',ts:'typescript',css:'css',json:'json',md:'markdown',py:'python',yaml:'yaml',yml:'yaml'})[e]||'plaintext'}
+function edLang(name){const e=(name.split('.').pop()||'').toLowerCase();return({html:'html',htm:'html',js:'javascript',mjs:'javascript',cjs:'javascript',ts:'typescript',tsx:'typescript',css:'css',scss:'scss',json:'json',md:'markdown',markdown:'markdown',py:'python',yaml:'yaml',yml:'yaml',kt:'kotlin',kts:'kotlin',java:'java',go:'go',rs:'rust',c:'c',cpp:'cpp',h:'c',hpp:'cpp',xml:'xml',svg:'xml',sh:'shell',toml:'plaintext',txt:'plaintext'})[e]||'plaintext'}
 function setEdDirty(s){edDirty=s;$('#ed-dirty').classList.toggle('on',!!s)}
 function showEditor(on){
   setTimeout(syncBack, 10);
@@ -3070,18 +3273,84 @@ function edLock(v){if(ed)ed.updateOptions({readOnly:!!v})}
 function edCheckSyntax(code, file){
   if(!code || !file) return null;
   const ext = (file.split(".").pop() || "").toLowerCase();
-  try {
-    if(ext === "json") JSON.parse(code);
-    else if(ext === "js" || ext === "mjs") new Function(code);
-    else if(ext === "xml" || ext === "html" || ext === "htm") {
-      const d = new DOMParser().parseFromString(code, "application/xml");
-      const pe = d.querySelector("parsererror");
-      if(pe) return (pe.textContent || "XML parse error").split("\n")[0].slice(0, 80);
+  const balance = (s, pairs)=>{
+    const st=[];
+    let inStr=null, esc=false, line=1, col=0;
+    for(let i=0;i<s.length;i++){
+      const c=s[i]; col++;
+      if(c==='\n'){line++;col=0}
+      if(inStr){
+        if(esc){esc=false;continue}
+        if(c==='\\'){esc=true;continue}
+        if(c===inStr) inStr=null;
+        continue;
+      }
+      if(c==='"'||c==="'"||c==='`'){inStr=c;continue}
+      if(c==='/' && s[i+1]==='/'){while(i+1<s.length && s[i+1]!=='\n')i++;continue}
+      if(c==='#' && (ext==='py'||ext==='yml'||ext==='yaml'||ext==='sh')){while(i+1<s.length && s[i+1]!=='\n')i++;continue}
+      for(const [o,cl] of pairs){
+        if(c===o){st.push([cl,line,col]);break}
+        if(c===cl){
+          if(!st.length||st[st.length-1][0]!==cl) return `Unmatched '${c}' near line ${line}`;
+          st.pop();break;
+        }
+      }
     }
+    if(st.length) return `Unclosed '${st[st.length-1][0]}' opened near line ${st[st.length-1][1]}`;
+    return null;
+  };
+  try {
+    if(ext === "json"){ JSON.parse(code); return null; }
+    if(ext === "js" || ext === "mjs" || ext === "cjs"){
+      try{ new Function(code); }catch(e){
+        const b=balance(code,[['(',')'],['[',']'],['{','}']]);
+        return b || (e.message||"JS syntax error").slice(0,100);
+      }
+      return null;
+    }
+    if(ext === "ts" || ext === "tsx"){
+      const b=balance(code,[['(',')'],['[',']'],['{','}']]);
+      if(b) return b;
+      return null;
+    }
+    if(ext === "xml" || ext === "html" || ext === "htm" || ext === "svg"){
+      const mime = (ext==="html"||ext==="htm") ? "text/html" : "application/xml";
+      const d = new DOMParser().parseFromString(code, mime);
+      const pe = d.querySelector("parsererror");
+      if(pe) return (pe.textContent || "XML/HTML parse error").split("\n")[0].slice(0, 80);
+      return null;
+    }
+    if(ext === "py"){
+      const b=balance(code,[['(',')'],['[',']'],['{','}']]);
+      if(b) return b;
+      const lines=code.split('\n');
+      let sawTab=false,sawSpace=false;
+      for(const ln of lines){
+        if(/^\t/.test(ln)) sawTab=true;
+        if(/^ /.test(ln)) sawSpace=true;
+        if(sawTab&&sawSpace) return "Mixed tabs and spaces in indentation";
+      }
+      const tqSingle=(code.match(/'''/g)||[]).length;
+      const tqDouble=(code.match(/"""/g)||[]).length;
+      if(tqSingle%2) return "Unclosed triple-quoted string (''')";
+      if(tqDouble%2) return 'Unclosed triple-quoted string (""")';
+      return null;
+    }
+    if(ext === "kt" || ext === "kts" || ext === "java" || ext === "cs" || ext === "go" || ext === "rs" || ext === "c" || ext === "cpp" || ext === "h" || ext === "hpp"){
+      return balance(code,[['(',')'],['[',']'],['{','}']]);
+    }
+    if(ext === "css" || ext === "scss"){
+      return balance(code,[['{','}'],['(',')']]);
+    }
+    if(ext === "yaml" || ext === "yml"){
+      if(/\t/.test(code)) return "YAML: tabs in content (use spaces)";
+      return balance(code,[['[',']'],['{','}']]);
+    }
+    if(ext === "md" || ext === "markdown" || ext === "txt" || ext === "toml") return null;
+    return balance(code,[['(',')'],['[',']'],['{','}']]);
   } catch(e) {
     return (e.message || "Syntax error").slice(0, 100);
   }
-  return null;
 }
 
 async function edExecuteStep(heal){
@@ -3093,6 +3362,18 @@ async function edExecuteStep(heal){
   $('#ed-rstat').style.color=heal?'var(--violet)':'var(--gold)';
   $('#ed-g-confirm').disabled=true;$('#ed-g-retry').disabled=true;$('#ed-g-manual').disabled=true;
   $('#ed-review').classList.add('active');edLock(true);
+  // Power user: optional per-extension model (no-copy path already bound)
+  if(cfg.power && cfg.ext_models && edFile){
+    const ext='.'+((edFile.split('.').pop()||'').toLowerCase());
+    const want=cfg.ext_models[ext]||cfg.ext_models[ext.slice(1)];
+    if(want){
+      try{
+        await nat('select_model',{path:want, slot:'coder'});
+        await nat('swap_model',{slot:'coder'});
+        await ninfo();
+      }catch(_){ /* stay on current coder */ }
+    }
+  }
   if(!heal&&edBackup===null)edBackup=ed.getValue();
   if(edBackup===null)edBackup=ed.getValue();
   const sys=`You are a precision code editor. Output ONLY one raw JSON object. Use the SMALLEST possible edit; never re-output the file.
@@ -3217,6 +3498,575 @@ $('#ed-g-abort')?.addEventListener('click',()=>{
   $('#ed-review').classList.remove('active');edChainRunning=false;edManual=false;edBackup=null;edLock(false);
   $('#ed-g-manual').textContent='Manual Edit';
 });
+})();
+
+
+function fillExtModels(){
+  const box=$('#ext-models-list'); if(!box) return;
+  const map=cfg.ext_models||{};
+  const keys=Object.keys(map).sort();
+  if(!keys.length){
+    box.innerHTML='<div style="color:var(--fg-3);font-size:12px;padding:4px">No extension maps yet. Example: <code>.py</code> → python fine-tune path.</div>';
+    return;
+  }
+  box.innerHTML=keys.map(ext=>{
+    const path=map[ext]||'';
+    const name=path.split('/').pop()||path;
+    return `<div style="display:flex;align-items:center;gap:8px;padding:6px 4px;border-bottom:1px solid var(--line)">
+      <code style="min-width:48px">${esc(ext)}</code>
+      <span style="flex:1;font-size:12px;word-break:break-all;color:var(--fg-2)">${esc(name)}</span>
+      <button class="btn sm dng" data-ext-del="${ea(ext)}">Remove</button>
+    </div>`;
+  }).join('');
+}
+function syncOcrUI(){
+  const s=$('#ocr-s'), st=$('#ocr-st');
+  const path=(NI&&NI.ocr_path)||cfg.ocr_path||'';
+  if(s) s.textContent = path ? (path.split('/').pop()+' · reserved (ML Kit still active)') : 'not set · using ML Kit';
+  if(st) st.textContent = path ? 'OCR path (optional)' : 'OCR path (optional)';
+  const m=$('#ocr-m'); if(m&&path) m.textContent='Bound → '+path;
+}
+/** Reconstruct rough tables / column blocks from OCR line boxes (uses last OCR cache). */
+function reconstructOcrLayout(ocrData){
+  if(!ocrData) return {tables:[], structured:''};
+  const lines=(ocrData.lines||[]).map(l=>({
+    page:l.page||1, text:(l.text||'').trim(),
+    x:l.box?+l.box.x:0, y:l.box?+l.box.y:0, w:l.box?+l.box.w:0, h:l.box?+l.box.h:0
+  })).filter(l=>l.text);
+  if(!lines.length) return {tables:[], structured:ocrData.text||''};
+  // Cluster into rows by Y (PDF bottom-left origin; same page)
+  const byPage={};
+  for(const l of lines){
+    (byPage[l.page]=byPage[l.page]||[]).push(l);
+  }
+  const tables=[];
+  const blocks=[];
+  for(const page of Object.keys(byPage).map(Number).sort((a,b)=>a-b)){
+    const pl=byPage[page].slice().sort((a,b)=>b.y-a.y || a.x-b.x); // top-to-bottom then LTR
+    const rows=[];
+    const yTol=Math.max(6, (pl[0]&&pl[0].h)||10)*0.85;
+    for(const l of pl){
+      let row=rows.find(r=>Math.abs(r.y-l.y)<yTol);
+      if(!row){ row={y:l.y,h:l.h,cells:[]}; rows.push(row); }
+      row.cells.push(l);
+      row.y=(row.y*row.cells.length + l.y)/(row.cells.length+1); // soft average — fix after
+    }
+    // Re-average y and sort cells by x
+    for(const r of rows){
+      r.y = r.cells.reduce((s,c)=>s+c.y,0)/r.cells.length;
+      r.cells.sort((a,b)=>a.x-b.x);
+    }
+    rows.sort((a,b)=>b.y-a.y);
+    // Detect multi-column table-ish bands: consecutive rows with >=2 cells and similar x columns
+    let band=[];
+    const flush=()=>{
+      if(band.length>=2 && band.every(r=>r.cells.length>=2)){
+        const cols=Math.max(...band.map(r=>r.cells.length));
+        const md=['| '+Array.from({length:cols},(_,i)=>band[0].cells[i]?band[0].cells[i].text:' ').join(' | ')+' |',
+                  '| '+Array.from({length:cols},()=>'---').join(' | ')+' |'];
+        for(let i=1;i<band.length;i++){
+          const cells=band[i].cells;
+          md.push('| '+Array.from({length:cols},(_,j)=>cells[j]?cells[j].text:' ').join(' | ')+' |');
+        }
+        tables.push({page, markdown:md.join('\n'), rows:band.length, cols});
+        blocks.push('--- table page '+page+' ---\n'+md.join('\n'));
+      } else {
+        for(const r of band) blocks.push(r.cells.map(c=>c.text).join('  '));
+      }
+      band=[];
+    };
+    for(const r of rows){
+      if(r.cells.length>=2) band.push(r);
+      else { flush(); blocks.push(r.cells.map(c=>c.text).join(' ')); }
+    }
+    flush();
+  }
+  return {tables, structured: blocks.join('\n'), plain: ocrData.text||''};
+}
+
+async function refreshModelsList(){
+  const box=$('#models-list'); if(!box)return;
+  box.innerHTML='<div style="color:var(--fg-3);padding:8px">Loading…</div>';
+  try{
+    const r=JSON.parse(await nat('list_models_dir',{}));
+    const models=(r.models)||[];
+    if($('#models-dir-in') && r.path) $('#models-dir-in').value=r.path;
+    const subs=(r.subdirs||['llm','embed','coder','image','ocr','decision']).join(', ');
+    if(!models.length){
+      box.innerHTML=`<div style="color:var(--fg-3);padding:8px;line-height:1.45">No .gguf files yet under <b>${esc(r.path||'Local Models')}</b>.<br>Subfolders ready: <code>${esc(subs)}</code><br>Drop models into the matching folder, then Refresh.<br><span style="opacity:.85">OCR GGUF is optional — bind under OCR slot if you have one; otherwise AI Fill uses ML Kit + your chat model.</span></div>`;
+      return;
+    }
+    box.innerHTML=`<div style="font-size:11px;color:var(--fg-3);padding:4px 6px 8px">Subfolders: ${esc(subs)}</div>`+models.map(m=>{
+      const mb=m.mb!=null?Math.round(m.mb)+' MB':Math.round((m.size||0)/1048576)+' MB';
+      const cat=m.category&&m.category!=='root'?` <span style="font-size:10px;padding:1px 6px;border-radius:999px;background:var(--bg-well);color:var(--fg-3)">${esc(m.category)}</span>`:'';
+      return `<div style="display:flex;flex-direction:column;gap:4px;padding:8px 6px;border-bottom:1px solid var(--line)">
+        <div style="font-weight:500;word-break:break-all">${esc(m.name)}${cat} <span style="color:var(--fg-3);font-weight:400">· ${mb}</span></div>
+        <div style="display:flex;flex-wrap:wrap;gap:6px">
+          <button class="btn sm" data-bind-model="chat" data-path="${ea(m.path)}">Chat</button>
+          <button class="btn sm" data-bind-model="coder" data-path="${ea(m.path)}">Coder</button>
+          <button class="btn sm" data-bind-model="emb" data-path="${ea(m.path)}">Embed</button>
+          <button class="btn sm" data-bind-model="ocr" data-path="${ea(m.path)}">OCR</button>
+          <button class="btn sm" data-bind-model="image" data-path="${ea(m.path)}">Image</button>
+        </div>
+      </div>`;
+    }).join('');
+  }catch(e){
+    box.innerHTML=`<div style="color:var(--danger);padding:8px">${esc(e.message||e)}<br><span style="color:var(--fg-3)">Grant all-files access if needed.</span></div>`;
+  }
+}
+
+/* ========== Offline converters + Mammoth DOCX (HTML bridge) ========== */
+const Convert = {
+  mammothReady: false,
+  async ensureMammoth(){
+    if(this.mammothReady && typeof mammoth!=='undefined') return true;
+    if(typeof mammoth!=='undefined'){ this.mammothReady=true; return true; }
+    // Fully offline: vendor/mammoth.browser.min.js (same pattern as pdf.js)
+    const trySrc = ['./vendor/mammoth.browser.min.js','vendor/mammoth.browser.min.js'];
+    let lastErr=null;
+    for(const src of trySrc){
+      try{
+        await new Promise((res,rej)=>{
+          const s=document.createElement('script');
+          s.src=src;
+          s.onload=()=>res();
+          s.onerror=()=>rej(Error('load failed: '+src));
+          document.head.appendChild(s);
+        });
+        if(typeof mammoth!=='undefined'){ this.mammothReady=true; return true; }
+      }catch(e){ lastErr=e; }
+    }
+    throw Error('Mammoth offline bundle missing under www/vendor/. '+ (lastErr&&lastErr.message||''));
+  },
+  async ensurePdfLib(){
+    if(typeof PDFLib!=='undefined') return;
+    if(typeof PDF!=='undefined' && PDF.ensureLibs) await PDF.ensureLibs();
+    if(typeof PDFLib==='undefined') throw Error('pdf-lib not loaded');
+  },
+  htmlToPlain(html){
+    const tmp=document.createElement('div'); tmp.innerHTML=html||'';
+    return (tmp.innerText||'').replace(/\n{3,}/g,'\n\n').trim();
+  },
+  /** Shared intermediate: plain/structured HTML both directions can consume */
+  async pdfToText(path, maxPages=30){
+    if(typeof pdfTool==='function'){
+      const r=await pdfTool('read_pdf_text',{path, max_pages:maxPages});
+      return r.text||'';
+    }
+    await PDF.ensureLibs();
+    const r=J.parse(await nat('read_file_b64',{path}));
+    const bin=atob(r.data.b64);
+    const raw=new Uint8Array(bin.length);
+    for(let i=0;i<bin.length;i++) raw[i]=bin.charCodeAt(i);
+    const doc=await pdfjsLib.getDocument({data:raw}).promise;
+    const max=Math.min(doc.numPages, maxPages);
+    let text='';
+    for(let i=1;i<=max;i++){
+      const page=await doc.getPage(i);
+      const tc=await page.getTextContent();
+      text+=(text?'\n\n':'')+'--- page '+i+' ---\n'+tc.items.map(it=>it.str).join(' ');
+    }
+    if(text.replace(/\s/g,'').length<40) text+='\n\n(Text layer sparse — use OCR on the PDF panel for scans.)';
+    return text;
+  },
+  async pdfToHtml(path){
+    const text=await this.pdfToText(path);
+    const parts=text.split(/\n*--- page \d+ ---\n*/).filter(Boolean);
+    const body=parts.map((p,i)=>`<section data-page="${i+1}"><h2>Page ${i+1}</h2><p>${esc(p).replace(/\n/g,'</p><p>')}</p></section>`).join('\n');
+    return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${esc(path)}</title></head><body>\n${body}\n</body></html>`;
+  },
+  async pdfToMarkdown(path){
+    const text=await this.pdfToText(path);
+    return text.replace(/\n{3,}/g,'\n\n').trim();
+  },
+  async docxToHtml(arrayBuffer){
+    await this.ensureMammoth();
+    const result=await mammoth.convertToHtml({arrayBuffer});
+    return {html:result.value, messages:result.messages||[]};
+  },
+  async docxToMarkdown(arrayBuffer){
+    await this.ensureMammoth();
+    if(typeof mammoth.convertToMarkdown==='function'){
+      const result=await mammoth.convertToMarkdown({arrayBuffer});
+      return result.value;
+    }
+    const {html}=await this.docxToHtml(arrayBuffer);
+    return this.htmlToPlain(html);
+  },
+  /**
+   * HTML → PDF via pdf-lib (text layout, not pixel-perfect Word).
+   * Bridge: DOCX → Mammoth HTML → this → PDF; or PDF → HTML → edit → this.
+   */
+  async htmlToPdfBytes(html, title){
+    await this.ensurePdfLib();
+    const plain=this.htmlToPlain(html);
+    const lines=plain.split(/\n/).map(l=>l.trimEnd());
+    const doc=await PDFLib.PDFDocument.create();
+    const font=await doc.embedFont(PDFLib.StandardFonts.Helvetica);
+    const fontSize=11, lineH=14, margin=48;
+    let page=doc.addPage();
+    let {width, height}=page.getSize();
+    let y=height-margin;
+    const maxW=width-margin*2;
+    const drawLine=(line)=>{
+      // crude wrap
+      const words=line.split(/\s+/);
+      let cur='';
+      const flush=()=>{
+        if(!cur) return;
+        if(y<margin+lineH){ page=doc.addPage(); ({width, height}=page.getSize()); y=height-margin; }
+        page.drawText(cur.slice(0,500), {x:margin, y, size:fontSize, font, maxWidth:maxW});
+        y-=lineH; cur='';
+      };
+      for(const w of words){
+        const trial=cur?cur+' '+w:w;
+        if(font.widthOfTextAtSize(trial, fontSize)>maxW && cur){ flush(); cur=w; }
+        else cur=trial;
+      }
+      flush();
+    };
+    if(title){ drawLine(title); y-=6; }
+    for(const line of lines){
+      if(!line){ y-=lineH*0.6; continue; }
+      drawLine(line);
+    }
+    return await doc.save();
+  },
+  async docxToPdf(path){
+    const buf=await this.readWorkspaceBytes(path);
+    const {html}=await this.docxToHtml(buf);
+    const bytes=await this.htmlToPdfBytes(html, path.split('/').pop());
+    const out=path.replace(/\.docx$/i,'.pdf');
+    await this.writeBytes(out, bytes);
+    return out;
+  },
+  async pdfViaHtmlToPdf(path){
+    // re-flow PDF text through HTML intermediate (lossy layout, good for cleanup)
+    const html=await this.pdfToHtml(path);
+    const bytes=await this.htmlToPdfBytes(html, path.split('/').pop());
+    const out=path.replace(/\.pdf$/i,'_reflow.pdf');
+    await this.writeBytes(out, bytes);
+    return out;
+  },
+  async htmlFileToPdf(htmlPath){
+    const raw=await nat('read_file',{path:htmlPath, full:true});
+    const j=JSON.parse(raw);
+    const bytes=await this.htmlToPdfBytes(j.text||'', htmlPath.split('/').pop());
+    const out=htmlPath.replace(/\.html?$/i,'.pdf');
+    await this.writeBytes(out, bytes);
+    return out;
+  },
+  async readWorkspaceBytes(path){
+    const raw=await nat('read_file_b64',{path});
+    const j=typeof raw==='string'?JSON.parse(raw):raw;
+    const b64=(j.data&&j.data.b64)||j.b64;
+    if(!b64) throw Error('Could not read file bytes');
+    const bin=atob(b64);
+    const u8=new Uint8Array(bin.length);
+    for(let i=0;i<bin.length;i++) u8[i]=bin.charCodeAt(i);
+    return u8.buffer;
+  },
+  async writeText(path, text){
+    await nat('write_file',{path, content:text, overwrite:true});
+  },
+  async writeBytes(path, u8){
+    let bin='';
+    const arr=u8 instanceof Uint8Array?u8:new Uint8Array(u8);
+    const chunk=0x8000;
+    for(let i=0;i<arr.length;i+=chunk) bin+=String.fromCharCode.apply(null, arr.subarray(i,i+chunk));
+    const b64=btoa(bin);
+    await nat('write_file_b64',{path, b64});
+  }
+};
+
+/* ========== File Viewer (Material Files-inspired) ========== */
+const FV = {
+  path: '.',
+  sort: 'name',
+  selected: null,
+  gates: [],
+  async show(on){
+    const v=$('#fv-view');
+    if(!v)return;
+    if(on){
+      drawer(false);
+      showEditor(false);
+      if(typeof showPdf==='function') showPdf(false);
+      v.classList.add('open');
+      this.render();
+    } else {
+      v.classList.remove('open');
+      $('#fv-preview')?.classList.remove('open');
+      $('#fv-sheet')?.classList.remove('open');
+    }
+  },
+  isGated(p){
+    const rel=(p||'').replace(/^\/+/,'');
+    return this.gates.some(g=>{
+      const gg=g.replace(/^\/+/,'').replace(/\/$/,'');
+      if(!gg)return false;
+      return rel===gg || rel.startsWith(gg+'/');
+    });
+  },
+  async render(){
+    const list=$('#fv-list'); if(!list)return;
+    $('#fv-path').textContent=this.path;
+    list.innerHTML='<div class="fv-empty">Loading…</div>';
+    try{
+      const r=JSON.parse(await nat('list_dir',{path:this.path,limit:200,sort:this.sort,hidden:false}));
+      const entries=(r.data&&r.data.entries)||[];
+      list.innerHTML='';
+      if(this.path!=='.'&&this.path!==''){
+        const up=document.createElement('div'); up.className='fv-row';
+        up.innerHTML='<div class="ico dir">⬆</div><div class="name">..</div>';
+        up.onclick=()=>{const parts=this.path.split('/').filter(Boolean);parts.pop();this.path=parts.join('/')||'.';this.render()};
+        list.appendChild(up);
+      }
+      if(!entries.length){ list.innerHTML+='<div class="fv-empty">(empty folder)</div>'; return }
+      entries.forEach(e=>{
+        const gated=this.isGated(e.p);
+        const row=document.createElement('div');
+        row.className='fv-row'+(gated?' gate-blocked':'');
+        const size=e.d?'':(e.s>=1048576?(e.s/1048576).toFixed(1)+' MB':e.s>=1024?Math.round(e.s/1024)+' KB':e.s+' B');
+        row.innerHTML=`<div class="ico ${e.d?'dir':''}">${e.d?'📁':'📄'}</div>
+          <div class="name">${esc(e.n)}${gated?'<span class="gate-badge blocked">AI blocked</span>':''}</div>
+          <div class="meta">${size||(e.m||'')}</div>`;
+        row.onclick=()=>{
+          if(e.d){ this.path=e.p; this.render(); }
+          else this.openSheet(e);
+        };
+        list.appendChild(row);
+      });
+    }catch(err){
+      list.innerHTML=`<div class="fv-empty" style="color:var(--danger)">${esc(err.message||String(err))}<br><span style="color:var(--fg-3)">Grant Files access in Settings if needed.</span></div>`;
+    }
+  },
+  openSheet(e){
+    this.selected=e;
+    $('#fv-sheet-title').textContent=e.n;
+    $('#fv-sheet-meta').textContent=(e.p||'')+' · '+(e.m||'')+(e.s?(' · '+e.s+' B'):'');
+    const gated=this.isGated(e.p);
+    const lower=(e.n||'').toLowerCase();
+    let convertBtns='';
+    if(lower.endsWith('.pdf')) convertBtns+=`<button class="btn sm" data-a="pdf-md">PDF → Markdown</button><button class="btn sm" data-a="pdf-txt">PDF → Text</button><button class="btn sm" data-a="pdf-html">PDF → HTML</button><button class="btn sm" data-a="pdf-reflow">PDF → PDF (via HTML)</button>`;
+    if(lower.endsWith('.docx')) convertBtns+=`<button class="btn sm" data-a="docx-view">View DOCX</button><button class="btn sm" data-a="docx-md">DOCX → Markdown</button><button class="btn sm" data-a="docx-txt">DOCX → Text</button><button class="btn sm" data-a="docx-html">DOCX → HTML</button><button class="btn sm" data-a="docx-pdf">DOCX → PDF</button>`;
+    if(lower.endsWith('.html')||lower.endsWith('.htm')) convertBtns+=`<button class="btn sm" data-a="html-pdf">HTML → PDF</button>`;
+    const acts=$('#fv-sheet-actions');
+    acts.innerHTML=`
+      ${convertBtns}
+      <button class="btn sm" data-a="preview">Preview</button>
+      <button class="btn sm" data-a="open-ed">Open in Code Editor</button>
+      <button class="btn sm" data-a="gate">${gated?'Unblock for AI':'Block for AI'}</button>
+      <button class="btn sm danger" data-a="delete">Delete</button>
+      <button class="btn sm" data-a="cancel">Cancel</button>`;
+    $('#fv-sheet').classList.add('open');
+    acts.onclick=async(ev)=>{
+      const b=ev.target.closest('[data-a]'); if(!b)return;
+      const a=b.dataset.a;
+      if(a==='cancel'){ $('#fv-sheet').classList.remove('open'); return }
+      try{
+        if(a==='pdf-md'){
+          const md=await Convert.pdfToMarkdown(e.p);
+          const out=e.p.replace(/\.pdf$/i,'.md');
+          await Convert.writeText(out, md);
+          alert('Wrote '+out); $('#fv-sheet').classList.remove('open'); this.render(); return;
+        }
+        if(a==='pdf-txt'){
+          const t=await Convert.pdfToText(e.p);
+          const out=e.p.replace(/\.pdf$/i,'.txt');
+          await Convert.writeText(out, t);
+          alert('Wrote '+out); $('#fv-sheet').classList.remove('open'); this.render(); return;
+        }
+        if(a==='pdf-html'){
+          const html=await Convert.pdfToHtml(e.p);
+          const out=e.p.replace(/\.pdf$/i,'.html');
+          await Convert.writeText(out, html);
+          alert('Wrote '+out+' (HTML bridge)'); $('#fv-sheet').classList.remove('open'); this.render(); return;
+        }
+        if(a==='pdf-reflow'){
+          const out=await Convert.pdfViaHtmlToPdf(e.p);
+          alert('Wrote '+out+' (PDF→HTML→PDF text reflow)'); $('#fv-sheet').classList.remove('open'); this.render(); return;
+        }
+        if(a==='docx-view'){
+          const buf=await Convert.readWorkspaceBytes(e.p);
+          const {html}=await Convert.docxToHtml(buf);
+          $('#fv-prev-title').textContent=e.n;
+          const body=$('#fv-prev-body');
+          if(body){ body.innerHTML=''; body.style.whiteSpace='normal'; body.style.fontFamily='inherit'; body.innerHTML=html; }
+          $('#fv-preview').classList.add('open');
+          $('#fv-sheet').classList.remove('open'); return;
+        }
+        if(a==='docx-md'||a==='docx-txt'){
+          const buf=await Convert.readWorkspaceBytes(e.p);
+          const md=await Convert.docxToMarkdown(buf);
+          const out=e.p.replace(/\.docx$/i, a==='docx-md'?'.md':'.txt');
+          await Convert.writeText(out, md);
+          alert('Wrote '+out); $('#fv-sheet').classList.remove('open'); this.render(); return;
+        }
+        if(a==='docx-html'){
+          const buf=await Convert.readWorkspaceBytes(e.p);
+          const {html}=await Convert.docxToHtml(buf);
+          const out=e.p.replace(/\.docx$/i,'.html');
+          await Convert.writeText(out, '<!DOCTYPE html><html><head><meta charset="utf-8"></head><body>'+html+'</body></html>');
+          alert('Wrote '+out+' (HTML bridge)'); $('#fv-sheet').classList.remove('open'); this.render(); return;
+        }
+        if(a==='docx-pdf'){
+          const out=await Convert.docxToPdf(e.p);
+          alert('Wrote '+out+' (DOCX→HTML→PDF)'); $('#fv-sheet').classList.remove('open'); this.render(); return;
+        }
+        if(a==='html-pdf'){
+          const out=await Convert.htmlFileToPdf(e.p);
+          alert('Wrote '+out); $('#fv-sheet').classList.remove('open'); this.render(); return;
+        }
+      }catch(err){ alert(err.message||err); return; }
+      if(a==='preview'){
+        $('#fv-sheet').classList.remove('open');
+        try{
+          const raw=await nat('read_file',{path:e.p,full:true});
+          const j=JSON.parse(raw);
+          $('#fv-prev-title').textContent=e.n;
+          const body=$('#fv-prev-body');
+          if(body){ body.style.whiteSpace='pre-wrap'; body.style.fontFamily='var(--mono)'; body.textContent=(j.text||'').slice(0,200000); }
+          $('#fv-preview').classList.add('open');
+        }catch(err){ alert(err.message||err) }
+        return;
+      }
+      if(a==='open-ed'){
+        $('#fv-sheet').classList.remove('open');
+        this.show(false);
+        showEditor(true);
+        try{
+          const raw=await nat('read_file',{path:e.p,full:true});
+          const j=JSON.parse(raw);
+          if(!ed)initMonaco();
+          const apply=()=>{ed.setValue(j.text||'');edFile=e.p;$('#ed-fname').textContent=e.p;monaco.editor.setModelLanguage(ed.getModel(),edLang(e.p));setEdDirty(false)};
+          if(ed)apply(); else setTimeout(apply,600);
+        }catch(err){ alert(err.message||err) }
+        return;
+      }
+      if(a==='gate'){
+        const rel=e.p.replace(/^\/+/,'');
+        if(gated) this.gates=this.gates.filter(g=>g!==rel && !rel.startsWith(g+'/'));
+        else this.gates.push(rel);
+        await this.persistGates();
+        $('#fv-sheet').classList.remove('open');
+        this.render();
+        return;
+      }
+      if(a==='delete'){
+        if(!confirm('Delete '+e.n+'?'))return;
+        try{ await nat('delete',{path:e.p}); $('#fv-sheet').classList.remove('open'); this.render(); }
+        catch(err){ alert(err.message||err) }
+      }
+    };
+  },
+  async persistGates(){
+    cfg.file_gates=this.gates.slice();
+    saveCfg();
+    try{ await nat('set_file_gates',{paths:this.gates}); }catch(_){}
+  },
+  loadGatesFromCfg(){
+    this.gates=Array.isArray(cfg.file_gates)?cfg.file_gates.slice():[];
+  }
+};
+function showFileViewer(on){ FV.show(on) }
+$('#fv-open')?.addEventListener('click',()=>{ FV.loadGatesFromCfg(); showFileViewer(true) });
+$('#fv-back')?.addEventListener('click',()=>showFileViewer(false));
+$('#fv-x')?.addEventListener('click',()=>showFileViewer(false));
+$('#fv-up')?.addEventListener('click',()=>{const parts=FV.path.split('/').filter(Boolean);parts.pop();FV.path=parts.join('/')||'.';FV.render()});
+$('#fv-refresh')?.addEventListener('click',()=>FV.render());
+$('#fv-sort')?.addEventListener('click',()=>{
+  FV.sort=FV.sort==='name'?'size':FV.sort==='size'?'date':'name';
+  $('#fv-sort').textContent='Sort: '+FV.sort;
+  FV.render();
+});
+$('#fv-mkdir')?.addEventListener('click',async()=>{
+  const name=prompt('Folder name'); if(!name)return;
+  const p=FV.path==='.'?name:FV.path+'/'+name;
+  try{ await nat('make_dir',{path:p}); FV.render(); }catch(e){ alert(e.message||e) }
+});
+$('#fv-gates')?.addEventListener('click',()=>{
+  sheet(true); setTimeout(()=>{ showTab('mem'); const ta=$('#gate-paths'); if(ta){ ta.value=(cfg.file_gates||[]).join('\n'); ta.focus() } },50);
+});
+$('#fv-prev-back')?.addEventListener('click',()=>$('#fv-preview').classList.remove('open'));
+$('#fv-prev-x')?.addEventListener('click',()=>$('#fv-preview').classList.remove('open'));
+
+/* ========== User Memories (Claude-style) ========== */
+async function loadMemoriesUI(){
+  const box=$('#mem-list'); if(!box)return;
+  box.innerHTML='<div class="mem-empty">Loading…</div>';
+  try{
+    const r=JSON.parse(await nat('list_facts',{limit:100}));
+    const facts=(r.data&&r.data.facts)||[];
+    if(!facts.length){ box.innerHTML='<div class="mem-empty">No memories yet. Say “remember that…” in chat, or tap Add memory.</div>'; return }
+    box.innerHTML='';
+    facts.forEach(f=>{
+      const el=document.createElement('div'); el.className='mem-item';
+      el.innerHTML=`<div class="tag">#${f.id} · ${esc(f.tag||'NOTE')}</div>
+        <div class="body" contenteditable="false" data-id="${f.id}">${esc(f.content||'')}</div>
+        <div class="ops">
+          <button data-op="edit" data-id="${f.id}">Edit</button>
+          <button data-op="save" data-id="${f.id}" hidden>Save</button>
+          <button class="danger" data-op="del" data-id="${f.id}">Delete</button>
+        </div>`;
+      box.appendChild(el);
+    });
+    box.onclick=async(ev)=>{
+      const b=ev.target.closest('[data-op]'); if(!b)return;
+      const id=+b.dataset.id; const op=b.dataset.op;
+      const item=b.closest('.mem-item'); const body=item.querySelector('.body');
+      if(op==='edit'){ body.contentEditable='true'; body.focus(); item.querySelector('[data-op=save]').hidden=false; b.hidden=true; return }
+      if(op==='save'){
+        const content=body.textContent.trim();
+        try{
+          await nat('update_fact',{id, content});
+          body.contentEditable='false';
+          item.querySelector('[data-op=edit]').hidden=false;
+          b.hidden=true;
+        }catch(e){ alert(e.message||e) }
+        return;
+      }
+      if(op==='del'){
+        if(!confirm('Delete this memory?'))return;
+        try{ await nat('clear_facts',{id}); loadMemoriesUI(); }catch(e){ alert(e.message||e) }
+      }
+    };
+  }catch(e){ box.innerHTML=`<div class="mem-empty" style="color:var(--danger)">${esc(e.message||e)}</div>` }
+}
+function loadGatesUI(){
+  const ta=$('#gate-paths'); if(!ta)return;
+  ta.value=(Array.isArray(cfg.file_gates)?cfg.file_gates:[]).join('\n');
+  FV.gates=Array.isArray(cfg.file_gates)?cfg.file_gates.slice():[];
+}
+document.addEventListener('click',async e=>{
+  if(e.target.closest('#mem-reload')){ loadMemoriesUI(); return }
+  if(e.target.closest('#mem-add')){
+    const content=prompt('Memory to store (short fact, under ~20 words)');
+    if(!content)return;
+    const tag=prompt('Category tag (e.g. PREF, ARCH, PERSON)', 'PREF')||'NOTE';
+    try{ await nat('save_fact',{tag, content}); loadMemoriesUI(); }catch(err){ alert(err.message||err) }
+    return;
+  }
+  if(e.target.closest('#mem-clear-all')){
+    if(!confirm('Permanently delete ALL user memories?'))return;
+    try{ await nat('clear_facts',{}); loadMemoriesUI(); }catch(err){ alert(err.message||err) }
+    return;
+  }
+  if(e.target.closest('#gate-save')){
+    const ta=$('#gate-paths');
+    const paths=(ta.value||'').split('\n').map(s=>s.trim()).filter(Boolean);
+    cfg.file_gates=paths; saveCfg(); FV.gates=paths.slice();
+    const m=$('#gate-m');
+    try{ await nat('set_file_gates',{paths}); if(m){ m.style.color='var(--success)'; m.textContent='Gates saved ('+paths.length+')'; } }
+    catch(err){ if(m){ m.style.color='var(--danger)'; m.textContent=err.message||err; } }
+    return;
+  }
+});
+
+// Back button: close file viewer
+(function(){
+  const _setBack=window.__setBack||(()=>{});
+  const orig=typeof backActive!=='undefined'?null:null;
 })();
 
 </script>

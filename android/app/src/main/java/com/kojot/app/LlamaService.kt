@@ -46,20 +46,22 @@ class LlamaService : Service() {
     private var wakeLock: PowerManager.WakeLock? = null
     private var readyListeners = mutableListOf<(Boolean, String?) -> Unit>()
 
-    private val embModel get() = File(filesDir, "nomic.gguf")
-    private val coderModel get() = File(filesDir, "coder.gguf")
-
-    private fun modelFile(): File {
-        val external = prefs.getString("model_path", null)
+    /** Prefer external path (no copy) when set and readable; else optional filesDir fallback. */
+    private fun resolveModel(prefKey: String, fallbackName: String): File {
+        val external = prefs.getString(prefKey, null)
         if (!external.isNullOrBlank()) {
             val f = File(external)
             if (f.isFile && f.canRead()) return f
         }
-        return File(filesDir, "model.gguf")
+        return File(filesDir, fallbackName)
     }
 
+    private fun modelFile(): File = resolveModel("model_path", "model.gguf")
+    private fun coderModelFile(): File = resolveModel("coder_path", "coder.gguf")
+    private fun embModelFile(): File = resolveModel("emb_path", "nomic.gguf")
+
     private fun activeModelFile(): File =
-        if (activeSlot == "coder" && coderModel.exists()) coderModel else modelFile()
+        if (activeSlot == "coder" && coderModelFile().isFile) coderModelFile() else modelFile()
 
     override fun onBind(intent: Intent?): IBinder = binder
 
@@ -126,7 +128,7 @@ class LlamaService : Service() {
 
     fun swapModel(slot: String): JSONObject {
         val target = if (slot == "coder") "coder" else "chat"
-        if (target == "coder" && !coderModel.exists()) {
+        if (target == "coder" && !coderModelFile().isFile) {
             return JSONObject().put("ok", false).put("error", "Coder model not installed").put("slot", activeSlot)
         }
         if (target == activeSlot && proc?.isAlive == true) {
@@ -199,7 +201,7 @@ class LlamaService : Service() {
             val exe = File(applicationInfo.nativeLibraryDir, "libllama_server.so")
             startEmbedding(exe)
 
-            if (!modelFile().exists() && !(activeSlot == "coder" && coderModel.exists())) {
+            if (!modelFile().isFile && !(activeSlot == "coder" && coderModelFile().isFile)) {
                 notifyReady(false, "No model file")
                 updateNotification("No model")
                 return
@@ -244,10 +246,11 @@ class LlamaService : Service() {
         embProc?.let { it.destroy(); try { it.waitFor() } catch (_: Exception) {} }
         embProc = null
         embReady = false
-        if (!embModel.exists()) return
+        val emb = embModelFile()
+        if (!emb.isFile) return
         try {
             val args = listOf(
-                exe.path, "-m", embModel.path,
+                exe.path, "-m", emb.path,
                 "--host", "127.0.0.1", "--port", "8081",
                 "--embedding", "-c", "512", "-t", "2"
             )
