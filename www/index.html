@@ -190,26 +190,47 @@ textarea.in{height:auto;min-height:64px;padding:9px 12px;font:13px/19px var(--mo
 
 
 /* ===== PDF Viewer / Form Editor ===== */
-#pdf-view{display:none;flex-direction:column;position:absolute;inset:0;background:var(--bg);z-index:5}
+#pdf-view{display:none;flex-direction:column;position:absolute;inset:0;background:#111;z-index:5}
 #pdf-view.on{display:flex}
-#pdf-header{height:44px;padding:0 8px;display:flex;align-items:center;justify-content:space-between;background:var(--bg-sidebar);border-bottom:1px solid var(--line);font-size:12px;color:var(--fg-2);flex-shrink:0}
-#pdf-header .file-pill{display:flex;align-items:center;gap:6px;color:var(--fg);font-weight:500;max-width:50%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-family:var(--mono)}
-#pdf-body{flex:1;min-height:0;display:flex;flex-direction:row}
-#pdf-canvas-wrap{flex:1;min-width:0;overflow:auto;background:#1a1a1a;display:flex;flex-direction:column;align-items:center;padding:12px;gap:12px}
-#pdf-canvas-wrap canvas{max-width:100%;box-shadow:0 4px 20px rgba(0,0,0,.5);background:#fff}
-#pdf-side{width:min(320px,42vw);flex:none;border-left:1px solid var(--line);background:var(--bg-sidebar);display:flex;flex-direction:column;min-height:0}
-#pdf-side-h{padding:10px 12px;font-size:12px;font-weight:600;border-bottom:1px solid var(--line);color:var(--fg-2)}
-#pdf-fields{flex:1;overflow-y:auto;padding:8px}
-.pdf-field{padding:8px 10px;border-radius:10px;border:1px solid var(--line);margin-bottom:8px;background:var(--bg-subtle)}
-.pdf-field label{display:block;font-size:11px;color:var(--fg-3);margin-bottom:4px;font-family:var(--mono)}
-.pdf-field input[type=text],.pdf-field select{width:100%;background:var(--bg);border:1px solid var(--line);color:var(--fg);font-size:13px;padding:6px 8px;border-radius:6px}
-.pdf-field input[type=checkbox]{width:18px;height:18px;accent-color:var(--accent)}
-#pdf-thumb{display:flex;gap:4px;padding:6px 8px;border-top:1px solid var(--line);background:var(--bg-sidebar);flex-wrap:wrap}
-.pdf-tbtn{flex:1;min-width:64px;padding:8px 6px;border-radius:8px;border:1px solid var(--line);background:var(--bg-subtle);color:var(--fg-2);font-size:11px;font-weight:600}
-.pdf-tbtn.primary{background:var(--accent);color:var(--on-accent);border-color:transparent}
-#pdf-sig-pad{display:none;position:fixed;inset:0;z-index:60;background:rgba(0,0,0,.7);align-items:center;justify-content:center}
+#pdf-header{height:48px;padding:0 6px 0 2px;display:flex;align-items:center;gap:4px;background:rgba(20,20,22,.96);border-bottom:1px solid var(--line);flex-shrink:0;backdrop-filter:blur(8px)}
+#pdf-header .file-pill{flex:1;min-width:0;font-size:13px;font-weight:600;color:var(--fg);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-family:var(--mono)}
+#pdf-page-lbl{font-family:var(--mono);font-size:11px;color:var(--fg-3);padding:0 6px;flex-shrink:0}
+#pdf-body{flex:1;min-height:0;position:relative;display:flex;flex-direction:column}
+#pdf-canvas-wrap{flex:1;min-height:0;overflow:auto;background:#0c0c0c;-webkit-overflow-scrolling:touch;touch-action:pan-x pan-y}
+#pdf-pages{display:flex;flex-direction:column;align-items:center;padding:10px 8px 88px;gap:10px;min-height:100%}
+#pdf-pages canvas{width:100%;max-width:720px;height:auto;box-shadow:0 2px 16px rgba(0,0,0,.55);background:#fff;border-radius:2px}
+#pdf-empty{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;padding:40px 24px;color:var(--fg-3);text-align:center;min-height:50vh}
+#pdf-empty b{color:var(--fg);font-size:15px}
+#pdf-empty .hint{font-size:12px;max-width:260px;line-height:1.4}
+#pdf-dock{position:absolute;left:0;right:0;bottom:0;padding:8px 10px calc(10px + env(safe-area-inset-bottom));display:flex;justify-content:center;pointer-events:none;z-index:6}
+#pdf-dock .bar{pointer-events:auto;display:flex;gap:4px;background:rgba(28,28,32,.94);border:1px solid var(--line);border-radius:16px;padding:6px;box-shadow:0 8px 28px rgba(0,0,0,.55);backdrop-filter:blur(12px);max-width:100%;overflow-x:auto}
+#pdf-dock .pbtn{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;min-width:52px;padding:8px 10px;border:none;border-radius:12px;background:transparent;color:var(--fg-2);font-size:10px;font-weight:600;cursor:pointer;touch-action:manipulation}
+#pdf-dock .pbtn svg{width:20px;height:20px;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+#pdf-dock .pbtn:active{background:var(--bg-hover)}
+#pdf-dock .pbtn.primary{color:var(--on-accent);background:var(--accent)}
+#pdf-dock .pbtn.ai{color:var(--cyan)}
+#pdf-dock .pbtn:disabled{opacity:.35}
+#pdf-status{position:absolute;left:50%;transform:translateX(-50%);bottom:78px;max-width:90%;padding:8px 14px;border-radius:20px;background:rgba(30,30,34,.94);border:1px solid var(--line);color:var(--fg);font-size:12px;z-index:7;opacity:0;pointer-events:none;transition:opacity .2s;text-align:center}
+#pdf-status.on{opacity:1}
+#pdf-status.err{border-color:var(--ember);color:#ffb4a8}
+#pdf-sheet-bd{display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:40}
+#pdf-sheet-bd.open{display:block}
+#pdf-sheet{position:fixed;left:0;right:0;bottom:0;max-height:72dvh;background:var(--bg-sidebar);border-top:1px solid var(--line);border-radius:16px 16px 0 0;z-index:41;transform:translateY(100%);transition:transform .25s cubic-bezier(.16,1,.3,1);display:flex;flex-direction:column;box-shadow:0 -12px 40px rgba(0,0,0,.55)}
+#pdf-sheet.open{transform:translateY(0)}
+#pdf-sheet .grab{width:36px;height:4px;border-radius:2px;background:var(--fg-3);opacity:.5;margin:10px auto 4px}
+#pdf-sheet .sh{display:flex;align-items:center;justify-content:space-between;padding:6px 14px 10px;font-weight:600;font-size:14px}
+#pdf-sheet .sb{flex:1;overflow-y:auto;padding:0 12px 16px;-webkit-overflow-scrolling:touch}
+#pdf-fields-count{font-size:11px;color:var(--fg-3);font-weight:500}
+.pdf-field{padding:10px 12px;border-radius:12px;border:1px solid var(--line);margin-bottom:8px;background:var(--bg-subtle)}
+.pdf-field label{display:block;font-size:11px;color:var(--fg-3);margin-bottom:5px;font-family:var(--mono);word-break:break-all}
+.pdf-field input[type=text],.pdf-field select,.pdf-field textarea{width:100%;background:var(--bg);border:1px solid var(--line);color:var(--fg);font-size:14px;padding:9px 10px;border-radius:8px;outline:none}
+.pdf-field input[type=text]:focus,.pdf-field select:focus{border-color:var(--accent)}
+.pdf-field input[type=checkbox]{width:20px;height:20px;accent-color:var(--accent);vertical-align:middle;margin-right:8px}
+#pdf-ai-in{width:100%;min-height:88px;background:var(--bg);border:1px solid var(--line);color:var(--fg);font-size:14px;padding:10px 12px;border-radius:10px;resize:vertical;outline:none}
+#pdf-ai-in:focus{border-color:var(--cyan)}
+#pdf-sig-pad{display:none;position:fixed;inset:0;z-index:60;background:rgba(0,0,0,.72);align-items:center;justify-content:center;padding:16px}
 #pdf-sig-pad.open{display:flex}
-#pdf-sig-box{background:var(--bg-elevated);border-radius:16px;padding:16px;width:min(360px,92vw);border:1px solid var(--line)}
+#pdf-sig-box{background:var(--bg-elevated);border-radius:16px;padding:16px;width:min(360px,94vw);border:1px solid var(--line)}
 #pdf-sig-canvas{width:100%;height:140px;background:#fff;border-radius:8px;touch-action:none;border:1px solid var(--line)}
 /* ===== Code Editor view (Monaco Mobile) ===== */
 :root{--cyan:#5eead4;--gold:#e5b567;--ember:#f43f5e;--violet:#a78bfa}
@@ -365,24 +386,38 @@ textarea.in{height:auto;min-height:64px;padding:9px 12px;font:13px/19px var(--mo
 <div id="pdf-view">
  <div id="pdf-header">
   <button class="ib" id="pdf-back" aria-label="Back"><svg viewBox="0 0 24 24"><path d="M15 6l-6 6 6 6"/></svg></button>
-  <div class="file-pill"><span id="pdf-title">No PDF</span></div>
-  <span id="pdf-page-lbl" style="font-family:var(--mono);font-size:11px;color:var(--fg-3)">—</span>
+  <div class="file-pill" id="pdf-title">No PDF open</div>
+  <span id="pdf-page-lbl">—</span>
+  <button class="ib" id="pdf-fields-toggle" aria-label="Fields" title="Form fields"><svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h10M4 18h14"/></svg></button>
   <button class="ib" id="pdf-x" aria-label="Close"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
  </div>
  <div id="pdf-body">
-  <div id="pdf-canvas-wrap"><div id="pdf-pages"></div></div>
-  <div id="pdf-side">
-   <div id="pdf-side-h">Form fields</div>
-   <div id="pdf-fields"><div class="note" style="padding:12px;color:var(--fg-3)">Open a PDF to list fillable fields.</div></div>
-   <div id="pdf-thumb">
-    <button class="pdf-tbtn" id="pdf-btn-open">Open</button>
-    <button class="pdf-tbtn" id="pdf-btn-ocr">OCR</button>
-    <button class="pdf-tbtn" id="pdf-btn-ai" style="color:var(--cyan)">AI Fill</button>
-    <button class="pdf-tbtn" id="pdf-btn-sig">Sign</button>
-    <button class="pdf-tbtn primary" id="pdf-btn-save">Save</button>
+  <div id="pdf-canvas-wrap">
+   <div id="pdf-empty">
+    <b>PDF workspace</b>
+    <div class="hint">Open a fillable PDF from your workspace. Most of the screen is the document — tools live in the bar below.</div>
+    <button class="btn sm go" id="pdf-empty-open" style="margin-top:4px">Open PDF</button>
+   </div>
+   <div id="pdf-pages" style="display:none"></div>
+  </div>
+  <div id="pdf-status"></div>
+  <div id="pdf-dock">
+   <div class="bar">
+    <button class="pbtn" id="pdf-btn-open"><svg viewBox="0 0 24 24"><path d="M3 7a1 1 0 011-1h4.5l1.5 2H20a1 1 0 011 1v9a1 1 0 01-1 1H4a1 1 0 01-1-1V7z"/></svg>Open</button>
+    <button class="pbtn" id="pdf-btn-ocr" disabled><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="6"/><path d="M20 20l-3.5-3.5"/><path d="M9 11h4M11 9v4"/></svg>OCR</button>
+    <button class="pbtn ai" id="pdf-btn-ai" disabled><svg viewBox="0 0 24 24"><path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8L12 3z"/></svg>AI Fill</button>
+    <button class="pbtn" id="pdf-btn-fields" disabled><svg viewBox="0 0 24 24"><path d="M9 5h11M9 12h11M9 19h11M5 5v.01M5 12v.01M5 19v.01"/></svg>Fields</button>
+    <button class="pbtn" id="pdf-btn-sig" disabled><svg viewBox="0 0 24 24"><path d="M3 17c3-1 5 2 8 0s5-1 8 1"/><path d="M4 21h16"/></svg>Sign</button>
+    <button class="pbtn primary" id="pdf-btn-save" disabled><svg viewBox="0 0 24 24"><path d="M5 3h11l4 4v13a1 1 0 01-1 1H5a1 1 0 01-1-1V4a1 1 0 011-1z"/><path d="M8 3v6h8V3"/></svg>Save</button>
    </div>
   </div>
  </div>
+</div>
+<div id="pdf-sheet-bd"></div>
+<div id="pdf-sheet">
+ <div class="grab"></div>
+ <div class="sh"><span id="pdf-sheet-title">Form fields</span><span id="pdf-fields-count"></span><button class="ib" id="pdf-sheet-x" aria-label="Close"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>
+ <div class="sb" id="pdf-sheet-body"></div>
 </div>
 <div id="pdf-sig-pad">
  <div id="pdf-sig-box">
@@ -391,7 +426,7 @@ textarea.in{height:auto;min-height:64px;padding:9px 12px;font:13px/19px var(--mo
   <div style="display:flex;gap:8px;margin-top:10px">
    <button class="btn sm" id="pdf-sig-clear">Clear</button>
    <button class="btn sm" id="pdf-sig-cancel">Cancel</button>
-   <button class="btn sm go" id="pdf-sig-ok" style="flex:1">Stamp on page</button>
+   <button class="btn sm go" id="pdf-sig-ok" style="flex:1">Stamp</button>
   </div>
  </div>
 </div>
@@ -1441,7 +1476,8 @@ window.syncBack = function() {
     $('#ed-fbrowser')?.classList.contains('open') ||
     $('#ed-ai-sheet')?.classList.contains('open') ||
     $('#ed-find')?.classList.contains('open') ||
-    $('#pdf-sig-pad')?.classList.contains('open')
+    $('#pdf-sig-pad')?.classList.contains('open') ||
+    $('#pdf-sheet')?.classList.contains('open')
   );
   if (window.Native && Native.setBackActive) {
     try { Native.setBackActive(active); } catch(_) {}
@@ -1463,6 +1499,10 @@ window.__goBack = function() {
   }
   if ($('#pdf-sig-pad')?.classList.contains('open')) {
     $('#pdf-sig-pad').classList.remove('open');
+    syncBack(); return true;
+  }
+  if ($('#pdf-sheet')?.classList.contains('open')) {
+    PDF.closeSheet();
     syncBack(); return true;
   }
   if ($('#pdf-view')?.classList.contains('on')) {
@@ -1760,27 +1800,69 @@ function done(){saveCfg();sheet(false);ping();syncVisionUI()}
 const PDF = {
   path: null,
   bytes: null,
-  doc: null,       // pdf.js doc for viewing
-  libDoc: null,    // pdf-lib doc for editing
+  doc: null,
+  libDoc: null,
   fields: [],
   page: 1,
   dirty: false,
   libsReady: false,
-  sigDataUrl: null,
+  scale: 1.15,
+
+  toast(msg, err){
+    const el = $('#pdf-status');
+    if(!el) return;
+    el.textContent = msg;
+    el.classList.toggle('err', !!err);
+    el.classList.add('on');
+    clearTimeout(this._tt);
+    this._tt = setTimeout(()=>el.classList.remove('on'), err?4500:2200);
+  },
+
+  setHasDoc(on){
+    const empty = $('#pdf-empty');
+    const pages = $('#pdf-pages');
+    if(empty) empty.style.display = on ? 'none' : 'flex';
+    if(pages) pages.style.display = on ? 'flex' : 'none';
+    ['pdf-btn-ocr','pdf-btn-ai','pdf-btn-fields','pdf-btn-sig','pdf-btn-save'].forEach(id=>{
+      const b=$('#'+id); if(b) b.disabled = !on;
+    });
+  },
+
+  async loadScript(src){
+    if(document.querySelector('script[data-pdfsrc="'+src+'"]')) return;
+    await new Promise((res,rej)=>{
+      const s=document.createElement('script');
+      s.src=src; s.async=true; s.dataset.pdfsrc=src;
+      s.onload=()=>res();
+      s.onerror=()=>rej(Error('Failed to load '+src.split('/').pop()));
+      document.head.appendChild(s);
+    });
+  },
 
   async ensureLibs(){
-    if(this.libsReady) return;
-    const load = (src) => new Promise((res,rej)=>{
-      if(document.querySelector('script[src="'+src+'"]')){res();return}
-      const s=document.createElement('script');s.src=src;s.onload=()=>res();s.onerror=()=>rej(Error('Failed to load '+src));document.head.appendChild(s);
-    });
-    // pdf.js + pdf-lib from CDN (needs network once; cached by WebView)
+    if(this.libsReady && typeof pdfjsLib!=='undefined' && typeof PDFLib!=='undefined') return;
+    const pdfjsCdn = [
+      'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js',
+      'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js'
+    ];
+    const workerCdn = [
+      'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js',
+      'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js'
+    ];
+    const libCdn = [
+      'https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js',
+      'https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/dist/pdf-lib.min.js'
+    ];
     if(typeof pdfjsLib==='undefined'){
-      await load('https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js');
-      pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+      let last;
+      for(const u of pdfjsCdn){ try{ await this.loadScript(u); last=null; break; }catch(e){ last=e; } }
+      if(last) throw last;
+      pdfjsLib.GlobalWorkerOptions.workerSrc = workerCdn[0];
     }
     if(typeof PDFLib==='undefined'){
-      await load('https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js');
+      let last;
+      for(const u of libCdn){ try{ await this.loadScript(u); last=null; break; }catch(e){ last=e; } }
+      if(last) throw last;
     }
     this.libsReady = true;
   },
@@ -1789,188 +1871,285 @@ const PDF = {
     const v=$('#pdf-view');
     if(!v)return;
     v.classList.toggle('on',!!on);
-    if(on){$('#editor-view')?.classList.remove('on');drawer(false)}
+    if(on){
+      $('#editor-view')?.classList.remove('on');
+      drawer(false);
+      try{syncBack()}catch(_){}
+    } else {
+      this.closeSheet();
+      try{syncBack()}catch(_){}
+    }
+  },
+
+  openSheet(title, html){
+    $('#pdf-sheet-title').textContent = title;
+    $('#pdf-sheet-body').innerHTML = html;
+    $('#pdf-sheet').classList.add('open');
+    $('#pdf-sheet-bd').classList.add('open');
+    try{syncBack()}catch(_){}
+  },
+  closeSheet(){
+    $('#pdf-sheet')?.classList.remove('open');
+    $('#pdf-sheet-bd')?.classList.remove('open');
+    try{syncBack()}catch(_){}
   },
 
   async openPath(path){
+    path = String(path||'').trim();
+    if(!path) throw Error('No path');
+    this.toast('Loading libraries…');
     await this.ensureLibs();
+    this.toast('Reading '+path.split('/').pop()+'…');
     const r = J.parse(await nat('read_file_b64',{path}));
+    if(!r.data || !r.data.b64) throw Error(r.text || 'Could not read file');
     const b64 = r.data.b64;
-    const raw = Uint8Array.from(atob(b64), c=>c.charCodeAt(0));
+    let raw;
+    try {
+      const bin = atob(b64);
+      raw = new Uint8Array(bin.length);
+      for(let i=0;i<bin.length;i++) raw[i]=bin.charCodeAt(i);
+    } catch(e){ throw Error('Invalid PDF data'); }
+    if(raw.length < 5 || String.fromCharCode(raw[0],raw[1],raw[2],raw[3]) !== '%PDF')
+      throw Error('Not a PDF file');
+
     this.path = path;
     this.bytes = raw;
     this.dirty = false;
     $('#pdf-title').textContent = path.split('/').pop();
+
+    // Viewer (pdf.js) — never touches the LLM
     this.doc = await pdfjsLib.getDocument({data: raw.slice()}).promise;
-    this.libDoc = await PDFLib.PDFDocument.load(raw.slice(), {ignoreEncryption:true});
+    // Editor (pdf-lib)
+    this.libDoc = await PDFLib.PDFDocument.load(raw.slice(), {ignoreEncryption:true, updateMetadata:false});
     this.page = 1;
+    this.setHasDoc(true);
     await this.renderPages();
     await this.refreshFields();
-    this.show(true);
+    this.toast((this.fields.length? this.fields.length+' fields · ' : '') + this.doc.numPages + ' page' + (this.doc.numPages===1?'':'s'));
   },
 
   async renderPages(){
     const wrap = $('#pdf-pages');
+    if(!wrap || !this.doc) return;
     wrap.innerHTML = '';
     const n = this.doc.numPages;
-    $('#pdf-page-lbl').textContent = n+' page'+(n===1?'':'s');
-    for(let i=1;i<=Math.min(n,20);i++){
+    $('#pdf-page-lbl').textContent = '1 / '+n;
+    // Fit width: measure container
+    const cw = Math.max(280, ($('#pdf-canvas-wrap')?.clientWidth || 360) - 16);
+    for(let i=1;i<=Math.min(n,25);i++){
       const page = await this.doc.getPage(i);
-      const viewport = page.getViewport({scale: 1.25});
+      const base = page.getViewport({scale:1});
+      const scale = Math.min(2.2, cw / base.width);
+      const viewport = page.getViewport({scale});
       const canvas = document.createElement('canvas');
-      canvas.width = viewport.width; canvas.height = viewport.height;
+      const dpr = Math.min(window.devicePixelRatio||1, 2);
+      canvas.width = Math.floor(viewport.width * dpr);
+      canvas.height = Math.floor(viewport.height * dpr);
+      canvas.style.width = Math.floor(viewport.width)+'px';
+      canvas.style.height = Math.floor(viewport.height)+'px';
       canvas.dataset.page = i;
-      await page.render({canvasContext: canvas.getContext('2d'), viewport}).promise;
+      const ctx = canvas.getContext('2d');
+      ctx.setTransform(dpr,0,0,dpr,0,0);
+      await page.render({canvasContext: ctx, viewport}).promise;
       wrap.appendChild(canvas);
+    }
+    if(n>25){
+      const more=document.createElement('div');
+      more.className='hint'; more.style.cssText='color:var(--fg-3);font-size:12px;padding:8px';
+      more.textContent='Showing first 25 of '+n+' pages';
+      wrap.appendChild(more);
     }
   },
 
   async refreshFields(){
-    const form = this.libDoc.getForm();
-    const fields = form.getFields();
-    this.fields = fields.map(f=>{
-      const name = f.getName();
-      const type = f.constructor.name;
-      let value = '', checked = null, options = null;
-      try{
-        if(type.includes('CheckBox')){ checked = f.isChecked(); }
-        else if(type.includes('Dropdown')||type.includes('Radio')){
-          value = f.getValue()?.toString?.() || '';
-          try{ options = f.getOptions?.() || null }catch(_){}
-        } else {
-          value = f.getText?.() ?? f.getValue?.()?.toString?.() ?? '';
-        }
-      }catch(_){}
-      return {name, type, value, checked, options};
-    });
-    this.renderFieldUI();
+    if(!this.libDoc){ this.fields=[]; return []; }
+    try{
+      const form = this.libDoc.getForm();
+      const fields = form.getFields();
+      this.fields = fields.map(f=>{
+        const name = f.getName();
+        const type = f.constructor.name;
+        let value='', checked=null, options=null;
+        try{
+          if(type.includes('CheckBox')) checked = f.isChecked();
+          else if(type.includes('Dropdown') || type.includes('OptionList') || type.includes('Radio')){
+            try{ value = (f.getValue && f.getValue()) ? String(f.getValue()) : ''; }catch(_){}
+            try{ options = f.getOptions ? f.getOptions() : null; }catch(_){}
+          } else if(f.getText) value = f.getText()||'';
+          else if(f.getValue) value = String(f.getValue()??'');
+        }catch(_){}
+        return {name,type,value,checked,options};
+      });
+    }catch(e){
+      this.fields = [];
+    }
+    const c=$('#pdf-fields-count');
+    if(c) c.textContent = this.fields.length ? this.fields.length+' fields' : 'No fields';
     return this.fields;
   },
 
-  renderFieldUI(){
-    const box = $('#pdf-fields');
-    if(!this.fields.length){
-      box.innerHTML = '<div class="note" style="padding:12px;color:var(--fg-3)">No fillable AcroForm fields. Use OCR for scanned text, or AI Fill for guidance.</div>';
-      return;
-    }
-    box.innerHTML = this.fields.map((f,i)=>{
+  fieldsHTML(){
+    if(!this.fields.length)
+      return '<div class="note" style="padding:16px;color:var(--fg-3);line-height:1.45">No fillable AcroForm fields in this PDF. You can still OCR scanned pages, stamp a signature, or use AI for guidance — but typed form fill needs a fillable PDF.</div>';
+    return this.fields.map((f,i)=>{
       if(f.checked!==null){
         return `<div class="pdf-field"><label><input type="checkbox" data-fi="${i}" ${f.checked?'checked':''}> ${esc(f.name)}</label></div>`;
       }
       if(f.options && f.options.length){
-        return `<div class="pdf-field"><label>${esc(f.name)}</label><select data-fi="${i}">${f.options.map(o=>`<option ${o===f.value?'selected':''}>${esc(o)}</option>`).join('')}</select></div>`;
+        return `<div class="pdf-field"><label>${esc(f.name)}</label><select data-fi="${i}">${f.options.map(o=>`<option ${String(o)===String(f.value)?'selected':''}>${esc(String(o))}</option>`).join('')}</select></div>`;
       }
       return `<div class="pdf-field"><label>${esc(f.name)}</label><input type="text" data-fi="${i}" value="${ea(f.value||'')}"></div>`;
     }).join('');
+  },
+
+  bindFieldInputs(){
+    const box = $('#pdf-sheet-body');
+    if(!box) return;
     box.querySelectorAll('[data-fi]').forEach(el=>{
-      el.addEventListener('change',()=>{
-        const i = +el.dataset.fi;
-        const f = this.fields[i];
-        if(!f)return;
-        if(el.type==='checkbox'){ f.checked = el.checked; f.value = el.checked?'Yes':'Off'; }
-        else { f.value = el.value; }
-        this.dirty = true;
-      });
+      const apply=()=>{
+        const i=+el.dataset.fi; const f=this.fields[i]; if(!f)return;
+        if(el.type==='checkbox'){ f.checked=el.checked; f.value=el.checked?'Yes':'Off'; }
+        else f.value=el.value;
+        this.dirty=true;
+      };
+      el.addEventListener('change',apply);
+      el.addEventListener('input',apply);
     });
   },
 
+  showFields(){
+    this.openSheet('Form fields', this.fieldsHTML());
+    this.bindFieldInputs();
+  },
+
   async applyFieldsToLib(){
+    if(!this.libDoc) return;
     const form = this.libDoc.getForm();
     for(const f of this.fields){
       try{
         const field = form.getField(f.name);
         if(!field) continue;
-        if(f.checked!==null && field.check){
-          if(f.checked) field.check(); else field.uncheck();
+        if(f.checked!==null){
+          if(f.checked && field.check) field.check();
+          else if(!f.checked && field.uncheck) field.uncheck();
         } else if(field.select && f.value!=null){
-          field.select(String(f.value));
+          try{ field.select(String(f.value)); }catch(_){ if(field.setText) field.setText(String(f.value)); }
         } else if(field.setText){
           field.setText(String(f.value??''));
         }
-      }catch(e){ console.warn('field apply', f.name, e); }
+      }catch(e){ console.warn('field', f.name, e); }
     }
   },
 
   async save(outPath){
+    if(!this.libDoc) throw Error('No PDF loaded');
     await this.applyFieldsToLib();
-    const saved = await this.libDoc.save();
+    const saved = await this.libDoc.save({updateFieldAppearances:true});
     const u8 = new Uint8Array(saved);
     let bin=''; const chunk=0x8000;
     for(let i=0;i<u8.length;i+=chunk) bin+=String.fromCharCode.apply(null,u8.subarray(i,i+chunk));
     const b64 = btoa(bin);
-    const path = outPath || this.path.replace(/\.pdf$/i,'_filled.pdf');
+    const path = outPath || (this.path||'form.pdf').replace(/\.pdf$/i,'_filled.pdf');
     await nat('write_file_b64',{path, b64});
-    this.dirty = false;
-    this.path = path;
+    this.dirty=false;
+    this.path=path;
     $('#pdf-title').textContent = path.split('/').pop();
-    // reload viewer from new bytes
-    this.bytes = new Uint8Array(saved);
+    this.bytes = u8;
     this.doc = await pdfjsLib.getDocument({data: this.bytes.slice()}).promise;
-    this.libDoc = await PDFLib.PDFDocument.load(this.bytes.slice(), {ignoreEncryption:true});
+    this.libDoc = await PDFLib.PDFDocument.load(this.bytes.slice(), {ignoreEncryption:true, updateMetadata:false});
     await this.renderPages();
     await this.refreshFields();
     return path;
   },
 
   async stampSignature(dataUrl){
-    await this.ensureLibs();
+    if(!this.libDoc) throw Error('No PDF loaded');
     const png = await fetch(dataUrl).then(r=>r.arrayBuffer());
     const img = await this.libDoc.embedPng(png);
     const pages = this.libDoc.getPages();
-    const page = pages[Math.min(this.page, pages.length)-1] || pages[0];
-    const w = 120, h = 40;
-    page.drawImage(img, {x: 72, y: 72, width: w, height: h});
-    this.dirty = true;
+    const page = pages[0];
+    const w=140, h=48;
+    page.drawImage(img,{x:54,y:54,width:w,height:h});
+    this.dirty=true;
+  },
+
+  showAiSheet(){
+    const html = `<p style="font-size:12px;color:var(--fg-3);margin:0 0 10px;line-height:1.4">Describe how to fill this form. Uses your <b>local</b> model + the field list only — the PDF file stays on device.</p>
+<textarea id="pdf-ai-in" placeholder="e.g. Name Jane Doe, date today, check Agree to terms"></textarea>
+<button class="btn sm go" id="pdf-ai-run" style="width:100%;margin-top:10px">Fill with local model</button>
+<div id="pdf-ai-status" style="font-size:11px;color:var(--fg-3);margin-top:8px;font-family:var(--mono)"></div>`;
+    this.openSheet('AI Fill', html);
+    $('#pdf-ai-run')?.addEventListener('click', async()=>{
+      const instr = ($('#pdf-ai-in')?.value||'').trim();
+      if(!instr){ this.toast('Enter instructions', true); return; }
+      const st=$('#pdf-ai-status'); if(st) st.textContent='Running…';
+      try{
+        const n = await this.aiFill(instr);
+        if(st) st.textContent='Updated '+n+' field(s). Review Fields, then Save.';
+        this.toast('Updated '+n+' field(s)');
+      }catch(e){
+        if(st) st.textContent=String(e.message||e);
+        this.toast(String(e.message||e), true);
+      }
+    });
   },
 
   async aiFill(instruction){
-    await this.ensureLibs();
     if(!this.fields.length) await this.refreshFields();
+    if(!this.fields.length) throw Error('No fillable fields — open a form PDF with AcroForm fields');
+    const catalog = this.fields.map(f=>({name:f.name, type:f.type.replace(/^PDF/,''), value:f.value, checked:f.checked})).slice(0,60);
     const schema = {
-      type:'object',
-      additionalProperties:false,
-      properties:{
-        fields:{
-          type:'array',
-          items:{
-            type:'object',
-            additionalProperties:false,
-            properties:{
-              name:{type:'string'},
-              value:{type:'string'},
-              checked:{type:'boolean'}
-            },
-            required:['name']
-          }
-        }
-      },
+      type:'object', additionalProperties:false,
+      properties:{ fields:{ type:'array', items:{ type:'object', additionalProperties:false,
+        properties:{ name:{type:'string'}, value:{type:'string'}, checked:{type:'boolean'} },
+        required:['name'] } } },
       required:['fields']
     };
-    const catalog = this.fields.map(f=>({name:f.name,type:f.type,value:f.value,checked:f.checked})).slice(0,80);
-    const sys = 'You fill PDF form fields. Output ONLY JSON {"fields":[{"name":"...","value":"..."} or {"name":"...","checked":true}]}. Use exact field names from the catalog. Do not invent names.';
-    const user = `INSTRUCTION: ${instruction}\n\nFIELD CATALOG:\n${JSON.stringify(catalog,null,0)}`;
+    const sys = 'You fill PDF form fields. Output ONLY JSON {"fields":[{"name":"...","value":"..."} or {"name":"...","checked":true}]}. Use exact field names from the catalog. Do not invent names. Only fill what the user asked.';
+    const user = 'INSTRUCTION: '+instruction+'\n\nFIELD CATALOG:\n'+JSON.stringify(catalog);
     const body = {
-      model:'local', temperature:0.1, max_tokens:1200,
+      model:'local', temperature:0.1, max_tokens:900,
       messages:[{role:'system',content:sys},{role:'user',content:user}],
       response_format:{type:'json_schema', json_schema:{name:'pdf_fill', strict:true, schema}}
     };
     const base=(cfg.url||'http://127.0.0.1:8080').replace(/\/$/,'');
-    const res=await fetch(base+'/v1/chat/completions',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
-    if(!res.ok) throw Error('HTTP '+res.status);
-    const data=await res.json();
-    let raw=data.choices?.[0]?.message?.content||'{}';
-    raw=raw.replace(/^```(?:json)?\s*/i,'').replace(/\s*```$/i,'').trim();
-    const parsed = JSON.parse(raw);
-    const updates = parsed.fields||[];
+    const ctrl = new AbortController();
+    const timer = setTimeout(()=>ctrl.abort(), 90000);
+    let res;
+    try{
+      res = await fetch(base+'/v1/chat/completions',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body),signal:ctrl.signal});
+    }finally{ clearTimeout(timer); }
+    if(!res.ok){
+      // Fallback without json_schema for servers that reject it
+      const body2 = {model:'local',temperature:0.1,max_tokens:900,messages:body.messages};
+      const res2 = await fetch(base+'/v1/chat/completions',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body2)});
+      if(!res2.ok) throw Error('Model error HTTP '+res.status);
+      res = res2;
+    }
+    const data = await res.json();
+    let raw = data.choices?.[0]?.message?.content || '{}';
+    raw = raw.replace(/^```(?:json)?\s*/i,'').replace(/\s*```$/i,'').trim();
+    // salvage first JSON object
+    const m = raw.match(/\{[\s\S]*\}/);
+    if(m) raw = m[0];
+    let parsed;
+    try{ parsed = JSON.parse(raw); }
+    catch(_){
+      // trailing comma / repair light
+      raw = raw.replace(/,\s*([}\]])/g,'$1');
+      parsed = JSON.parse(raw);
+    }
+    const updates = parsed.fields || [];
+    let n=0;
     for(const u of updates){
       const f = this.fields.find(x=>x.name===u.name);
       if(!f) continue;
       if(typeof u.checked==='boolean'){ f.checked=u.checked; f.value=u.checked?'Yes':'Off'; }
-      else if(u.value!=null){ f.value=String(u.value); }
+      else if(u.value!=null) f.value=String(u.value);
+      n++;
     }
-    this.dirty = true;
-    this.renderFieldUI();
-    return updates;
+    this.dirty=true;
+    return n;
   }
 };
 
@@ -1979,8 +2158,9 @@ async function pdfTool(name, a){
   if(name==='list_pdf_fields'){
     if(!PDF.path || PDF.path!==a.path) await PDF.openPath(a.path);
     else await PDF.refreshFields();
-    const lines = PDF.fields.map(f=>`- ${f.name} (${f.type.replace('PDF','')}) = ${f.checked!==null?f.checked:JSON.stringify(f.value)}`);
-    return {text: lines.length?`Fields in ${a.path}:\n`+lines.join('\n'):`No fillable fields in ${a.path}`, data:{fields:PDF.fields,path:a.path}};
+    PDF.show(true);
+    const lines = PDF.fields.map(f=>'- '+f.name+' ('+f.type.replace(/^PDF/,'')+') = '+(f.checked!==null?f.checked:JSON.stringify(f.value)));
+    return {text: lines.length?('Fields in '+a.path+':\n'+lines.join('\n')):('No fillable fields in '+a.path), data:{fields:PDF.fields,path:a.path}};
   }
   if(name==='fill_pdf_fields'){
     if(!PDF.path || PDF.path!==a.path) await PDF.openPath(a.path);
@@ -1988,40 +2168,28 @@ async function pdfTool(name, a){
     for(const u of updates){
       const f = PDF.fields.find(x=>x.name===u.name);
       if(!f) continue;
-      if(typeof u.checked==='boolean'){ f.checked=u.checked; }
-      else if(u.value!=null){ f.value=String(u.value); }
+      if(typeof u.checked==='boolean') f.checked=u.checked;
+      else if(u.value!=null) f.value=String(u.value);
     }
-    PDF.renderFieldUI();
     const out = await PDF.save(a.out_path||undefined);
-    return {text:`Filled ${updates.length} field(s), saved ${out}`, data:{path:out, updated:updates.length}};
+    PDF.show(true);
+    return {text:'Filled '+updates.length+' field(s), saved '+out, data:{path:out, updated:updates.length}};
   }
   if(name==='read_pdf_text'){
-    // Prefer text layer via pdf.js; if sparse, hint OCR
-    if(!PDF.path || PDF.path!==a.path){
-      const r = J.parse(await nat('read_file_b64',{path:a.path}));
-      const raw = Uint8Array.from(atob(r.data.b64), c=>c.charCodeAt(0));
-      await PDF.ensureLibs();
-      const doc = await pdfjsLib.getDocument({data:raw}).promise;
-      const max = Math.min(doc.numPages, a.max_pages||10);
-      let text = '';
-      for(let i=1;i<=max;i++){
-        const page = await doc.getPage(i);
-        const tc = await page.getTextContent();
-        const pageText = tc.items.map(it=>it.str).join(' ');
-        text += (text?'\n\n':'') + `--- page ${i} ---\n` + pageText;
-      }
-      const sparse = text.replace(/\s/g,'').length < 40;
-      if(sparse) text += '\n\n(Text layer sparse — call ocr_pdf for scanned pages.)';
-      return {text, data:{path:a.path, pages:max}};
-    }
-    // open path already in PDF
-    const max = Math.min(PDF.doc.numPages, a.max_pages||10);
-    let text = '';
+    await PDF.ensureLibs();
+    const r = J.parse(await nat('read_file_b64',{path:a.path}));
+    const bin = atob(r.data.b64);
+    const raw = new Uint8Array(bin.length);
+    for(let i=0;i<bin.length;i++) raw[i]=bin.charCodeAt(i);
+    const doc = await pdfjsLib.getDocument({data:raw}).promise;
+    const max = Math.min(doc.numPages, a.max_pages||10);
+    let text='';
     for(let i=1;i<=max;i++){
-      const page = await PDF.doc.getPage(i);
-      const tc = await page.getTextContent();
-      text += (text?'\n\n':'') + `--- page ${i} ---\n` + tc.items.map(it=>it.str).join(' ');
+      const page=await doc.getPage(i);
+      const tc=await page.getTextContent();
+      text += (text?'\n\n':'')+'--- page '+i+' ---\n'+tc.items.map(it=>it.str).join(' ');
     }
+    if(text.replace(/\s/g,'').length<40) text += '\n\n(Text layer sparse — call ocr_pdf for scanned pages.)';
     return {text, data:{path:a.path, pages:max}};
   }
   throw Error('unknown pdf tool');
@@ -2029,36 +2197,51 @@ async function pdfTool(name, a){
 
 function showPdf(on){ PDF.show(on); }
 
+async function pdfPickAndOpen(){
+  try{
+    // Prefer a simple path under workspace; list root for hints
+    let hint='.';
+    try{
+      const ls=J.parse(await nat('list_dir',{path:'.',limit:40}));
+      const pdfs=(ls.data&&ls.data.entries||[]).filter(e=>!e.d && /\.pdf$/i.test(e.n)).map(e=>e.p||e.n);
+      if(pdfs.length) hint = pdfs.slice(0,8).join(', ');
+    }catch(_){}
+    const path = prompt('PDF path in workspace (e.g. forms/w9.pdf)'+(hint&&hint!=='.'?'\n\nPDFs in root: '+hint:''));
+    if(!path) return;
+    PDF.show(true);
+    await PDF.openPath(path.trim());
+  }catch(e){
+    PDF.toast(String(e.message||e), true);
+  }
+}
+
 $('#pdf-open')?.addEventListener('click',()=>{drawer(false); showPdf(true);});
 $('#pdf-toggle')?.addEventListener('click',()=>showPdf(!$('#pdf-view')?.classList.contains('on')));
 $('#pdf-back')?.addEventListener('click',()=>showPdf(false));
 $('#pdf-x')?.addEventListener('click',()=>showPdf(false));
-$('#pdf-btn-open')?.addEventListener('click',async()=>{
-  // Reuse editor file browser if present
-  try{
-    const path = prompt('PDF path relative to workspace (e.g. forms/w9.pdf)');
-    if(!path) return;
-    await PDF.openPath(path.trim());
-  }catch(e){ alert(e.message||e); }
-});
+$('#pdf-empty-open')?.addEventListener('click',()=>pdfPickAndOpen());
+$('#pdf-btn-open')?.addEventListener('click',()=>pdfPickAndOpen());
+$('#pdf-fields-toggle')?.addEventListener('click',()=>{ if(PDF.path) PDF.showFields(); else pdfPickAndOpen(); });
+$('#pdf-btn-fields')?.addEventListener('click',()=>{ if(PDF.path) PDF.showFields(); });
+$('#pdf-sheet-x')?.addEventListener('click',()=>PDF.closeSheet());
+$('#pdf-sheet-bd')?.addEventListener('click',()=>PDF.closeSheet());
 $('#pdf-btn-save')?.addEventListener('click',async()=>{
-  try{ const p=await PDF.save(); alert('Saved '+p); }catch(e){ alert(e.message||e); }
+  try{ PDF.toast('Saving…'); const p=await PDF.save(); PDF.toast('Saved '+p); }
+  catch(e){ PDF.toast(String(e.message||e), true); }
 });
 $('#pdf-btn-ocr')?.addEventListener('click',async()=>{
-  if(!PDF.path){alert('Open a PDF first');return}
+  if(!PDF.path){ PDF.toast('Open a PDF first', true); return; }
   try{
+    PDF.toast('OCR running on device…');
     const r=J.parse(await nat('ocr_pdf',{path:PDF.path,max_pages:6}));
-    alert((r.text||'').slice(0,1500));
-  }catch(e){ alert(e.message||e); }
+    const body = '<pre style="white-space:pre-wrap;font-size:12px;line-height:1.4;margin:0">'
+      +esc((r.text||'').slice(0,4000))+'</pre>';
+    PDF.openSheet('OCR result', body);
+  }catch(e){ PDF.toast(String(e.message||e), true); }
 });
-$('#pdf-btn-ai')?.addEventListener('click',async()=>{
-  if(!PDF.path){alert('Open a PDF first');return}
-  const instr = prompt('How should the form be filled? (uses local model + field catalog)');
-  if(!instr) return;
-  try{
-    const updates = await PDF.aiFill(instr);
-    alert('Updated '+updates.length+' field(s). Review sidebar, then Save.');
-  }catch(e){ alert(e.message||e); }
+$('#pdf-btn-ai')?.addEventListener('click',()=>{
+  if(!PDF.path){ PDF.toast('Open a PDF first', true); return; }
+  PDF.showAiSheet();
 });
 
 // Signature pad
@@ -2075,14 +2258,18 @@ $('#pdf-btn-ai')?.addEventListener('click',async()=>{
   const start=e=>{drawing=true;last=pos(e);e.preventDefault()};
   const move=e=>{
     if(!drawing)return; const p=pos(e);
-    ctx.strokeStyle='#111';ctx.lineWidth=2;ctx.lineCap='round';
+    ctx.strokeStyle='#111';ctx.lineWidth=2.2;ctx.lineCap='round';
     ctx.beginPath();ctx.moveTo(last.x,last.y);ctx.lineTo(p.x,p.y);ctx.stroke();
     last=p;e.preventDefault();
   };
   const end=()=>{drawing=false};
   canvas.addEventListener('mousedown',start);canvas.addEventListener('mousemove',move);window.addEventListener('mouseup',end);
   canvas.addEventListener('touchstart',start,{passive:false});canvas.addEventListener('touchmove',move,{passive:false});canvas.addEventListener('touchend',end);
-  $('#pdf-btn-sig')?.addEventListener('click',()=>{$('#pdf-sig-pad').classList.add('open');ctx.fillStyle='#fff';ctx.fillRect(0,0,canvas.width,canvas.height)});
+  $('#pdf-btn-sig')?.addEventListener('click',()=>{
+    if(!PDF.path){ PDF.toast('Open a PDF first', true); return; }
+    $('#pdf-sig-pad').classList.add('open');
+    ctx.fillStyle='#fff';ctx.fillRect(0,0,canvas.width,canvas.height);
+  });
   $('#pdf-sig-clear')?.addEventListener('click',()=>{ctx.fillStyle='#fff';ctx.fillRect(0,0,canvas.width,canvas.height)});
   $('#pdf-sig-cancel')?.addEventListener('click',()=>{$('#pdf-sig-pad').classList.remove('open')});
   $('#pdf-sig-ok')?.addEventListener('click',async()=>{
@@ -2090,8 +2277,8 @@ $('#pdf-btn-ai')?.addEventListener('click',async()=>{
       const url=canvas.toDataURL('image/png');
       await PDF.stampSignature(url);
       $('#pdf-sig-pad').classList.remove('open');
-      alert('Signature stamped (bottom-left of current page area). Save to write file.');
-    }catch(e){alert(e.message||e)}
+      PDF.toast('Signature stamped — Save to write file');
+    }catch(e){ PDF.toast(String(e.message||e), true); }
   });
 })();
 
