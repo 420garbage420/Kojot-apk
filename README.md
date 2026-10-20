@@ -88,3 +88,5 @@ survive leaving the app or system reclaiming the Activity.
 - **Power user: models by file type** — Map extensions (e.g. `.py`) to specialized no-copy GGUFs. Monaco AI edit chains soft-swap to that model when Power user is on.
 - **Syntax check by file type** — Editor validates JSON, JS, TS, HTML/XML, Python (brackets + indent + triple-quotes), Kotlin/Java/C-family, CSS, YAML with language-appropriate rules.
 - **OCR layout reconstruction** — After OCR, line boxes are clustered into rows/columns; markdown tables and structured layout are cached on the PDF object and fed into AI Fill.
+
+- **Vision OCR runner (:8082)** — Binding an OCR GGUF starts a second llama-server. Place a matching `*mmproj*.gguf` beside the model for multimodal image OCR. PdfTools prefers vision text when the server is healthy, keeps ML Kit line boxes for layout, and falls back to ML Kit entirely if the server is down or mmproj is missing.

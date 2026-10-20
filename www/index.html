@@ -1799,7 +1799,7 @@ function paneTools(){return`<div class="pane" data-p="tool"><div class="sec">Pho
  <div class="tst" id="ext-m-msg"></div>
 
  <div class="sec">OCR engine</div>
- <div class="note" style="margin:0 0 8px">Default is on-device <b>ML Kit</b> (no GGUF). Bind a model with the OCR button in the list above to record an optional OCR path for a future vision engine; until then AI Fill always falls back to ML Kit.</div>
+ <div class="note" style="margin:0 0 8px">Default is on-device <b>ML Kit</b>. Bind a vision GGUF with the <b>OCR</b> button above to start a runner on <code>:8082</code>. Put a matching <code>*mmproj*.gguf</code> next to the model for image input. Without mmproj or if the server is down, OCR falls back to ML Kit. Line geometry always comes from ML Kit when available.</div>
  <div class="set"><div class="lt"><span id="ocr-st">OCR path (optional)</span><small id="ocr-s">not set · using ML Kit</small></div></div>
  <div class="tst" id="ocr-m"></div>
 
@@ -3522,9 +3522,20 @@ function fillExtModels(){
 function syncOcrUI(){
   const s=$('#ocr-s'), st=$('#ocr-st');
   const path=(NI&&NI.ocr_path)||cfg.ocr_path||'';
-  if(s) s.textContent = path ? (path.split('/').pop()+' · reserved (ML Kit still active)') : 'not set · using ML Kit';
-  if(st) st.textContent = path ? 'OCR path (optional)' : 'OCR path (optional)';
-  const m=$('#ocr-m'); if(m&&path) m.textContent='Bound → '+path;
+  const ready=NI&&NI.ocr_ready;
+  if(s){
+    if(!path) s.textContent='not set · using ML Kit';
+    else if(ready) s.textContent=path.split('/').pop()+' · vision server :8082 ready';
+    else s.textContent=path.split('/').pop()+' · bound (waiting :8082 or ML Kit fallback)';
+  }
+  if(st) st.textContent='OCR path (optional)';
+  const m=$('#ocr-m');
+  if(m){
+    if(!path) m.textContent='';
+    else m.textContent=ready
+      ? 'Vision OCR live — put mmproj next to the GGUF for images. Line boxes still from ML Kit when available.'
+      : 'Bound → '+path+' — place a matching *mmproj*.gguf beside it, or OCR uses ML Kit.';
+  }
 }
 /** Reconstruct rough tables / column blocks from OCR line boxes (uses last OCR cache). */
 function reconstructOcrLayout(ocrData){

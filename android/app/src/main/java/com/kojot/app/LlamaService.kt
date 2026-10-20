@@ -34,7 +34,10 @@ class LlamaService : Service() {
 
     @Volatile private var proc: Process? = null
     @Volatile private var embProc: Process? = null
+    @Volatile private var ocrProc: Process? = null
     @Volatile var embReady: Boolean = false
+        private set
+    @Volatile var ocrReady: Boolean = false
         private set
     @Volatile var activeSlot: String = "chat"
         private set
@@ -59,6 +62,23 @@ class LlamaService : Service() {
     private fun modelFile(): File = resolveModel("model_path", "model.gguf")
     private fun coderModelFile(): File = resolveModel("coder_path", "coder.gguf")
     private fun embModelFile(): File = resolveModel("emb_path", "nomic.gguf")
+    private fun ocrModelFile(): File = resolveModel("ocr_path", "ocr.gguf")
+
+    /** Sibling mmproj for vision models. */
+    private fun findMmproj(model: File): File? {
+        val dir = model.parentFile ?: return null
+        val stem = model.nameWithoutExtension
+        val candidates = listOf(
+            File(dir, "$stem.mmproj.gguf"),
+            File(dir, "$stem-mmproj.gguf"),
+            File(dir, "mmproj-$stem.gguf"),
+            File(dir, "mmproj.gguf")
+        )
+        candidates.firstOrNull { it.isFile && it.canRead() }?.let { return it }
+        return dir.listFiles()?.firstOrNull { f ->
+            f.isFile && f.canRead() && f.name.contains("mmproj", ignoreCase = true) && f.name.endsWith(".gguf", true)
+        }
+    }
 
     private fun activeModelFile(): File =
         if (activeSlot == "coder" && coderModelFile().isFile) coderModelFile() else modelFile()
@@ -122,6 +142,7 @@ class LlamaService : Service() {
         val old = proc; proc = null
         val oldEmb = embProc; embProc = null
         embReady = false
+        ocrReady = false
         ready = false
         thread { boot(old, oldEmb) }
     }
@@ -177,17 +198,22 @@ class LlamaService : Service() {
     fun stopServers() {
         proc?.destroy()
         embProc?.destroy()
+        ocrProc?.destroy()
         try { proc?.waitFor() } catch (_: Exception) {}
         try { embProc?.waitFor() } catch (_: Exception) {}
+        try { ocrProc?.waitFor() } catch (_: Exception) {}
         proc = null
         embProc = null
+        ocrProc = null
         embReady = false
+        ocrReady = false
         ready = false
         releaseWakeLock()
     }
 
     fun isChatAlive(): Boolean = proc?.isAlive == true
     fun isEmbAlive(): Boolean = embProc?.isAlive == true
+    fun isOcrAlive(): Boolean = ocrProc?.isAlive == true && ocrReady
 
     private fun boot(old: Process?, oldEmb: Process?) {
         try {
@@ -200,6 +226,7 @@ class LlamaService : Service() {
 
             val exe = File(applicationInfo.nativeLibraryDir, "libllama_server.so")
             startEmbedding(exe)
+            startOcr(exe)
 
             if (!modelFile().isFile && !(activeSlot == "coder" && coderModelFile().isFile)) {
                 notifyReady(false, "No model file")
@@ -273,6 +300,64 @@ class LlamaService : Service() {
             }
         } catch (e: Exception) {
             Log.e(TAG, "embedding failed: ${e.message}")
+        }
+    }
+
+    /**
+     * Optional vision/OCR server on :8082.
+     * Needs ocr_path GGUF. With a matching mmproj next to it, starts multimodal llama-server.
+     * Without mmproj, PdfTools falls back to ML Kit for image OCR.
+     */
+    private fun startOcr(exe: File) {
+        ocrProc?.let { it.destroy(); try { it.waitFor() } catch (_: Exception) {} }
+        ocrProc = null
+        ocrReady = false
+        val ocr = ocrModelFile()
+        if (!ocr.isFile) {
+            Log.d(TAG, "OCR GGUF not bound — ML Kit fallback only")
+            return
+        }
+        try {
+            val mmproj = findMmproj(ocr)
+            val args = mutableListOf(
+                exe.path, "-m", ocr.path,
+                "--host", "127.0.0.1", "--port", "8082",
+                "-c", "4096", "-t", "4", "--jinja"
+            )
+            if (mmproj != null) {
+                args.add("--mmproj")
+                args.add(mmproj.path)
+                Log.i(TAG, "OCR vision: ${ocr.name} + mmproj ${mmproj.name}")
+            } else {
+                Log.i(TAG, "OCR model ${ocr.name} without mmproj (vision needs mmproj; ML Kit remains primary)")
+            }
+            val p = ProcessBuilder(args).redirectErrorStream(true).start()
+            ocrProc = p
+            thread { p.inputStream.bufferedReader().forEachLine { Log.d("llama-ocr", it) } }
+            thread {
+                repeat(90) {
+                    if (!p.isAlive) return@thread
+                    try {
+                        val c = URL("http://127.0.0.1:8082/health").openConnection() as HttpURLConnection
+                        c.connectTimeout = 500; c.readTimeout = 500
+                        if (c.responseCode == 200) {
+                            ocrReady = true
+                            Log.i(TAG, "OCR server ready on :8082")
+                            return@thread
+                        }
+                    } catch (_: Exception) {}
+                    Thread.sleep(500)
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "OCR server failed: ${e.message}")
+        }
+    }
+
+    fun restartOcr() {
+        thread {
+            val exe = File(applicationInfo.nativeLibraryDir, "libllama_server.so")
+            startOcr(exe)
         }
     }
 

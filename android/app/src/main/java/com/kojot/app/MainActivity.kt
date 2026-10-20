@@ -21,6 +21,7 @@ import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.FrameLayout
 import android.widget.TextView
+import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 import java.net.HttpURLConnection
@@ -673,8 +674,12 @@ class MainActivity : Activity() {
                     runOnUiThread { if (llama != null) llama?.restartServers() else bindAndStartService() }
                 }
                 "ocr", "image" -> {
-                    // Reserved — OCR today is ML Kit (not a GGUF). Path stored for a future engine.
                     prefs.edit().putString("${slot}_path", f.canonicalPath).putString("${slot}_name", f.name).apply()
+                    if (slot == "ocr") {
+                        runOnUiThread {
+                            try { llama?.restartOcr() } catch (_: Exception) {}
+                        }
+                    }
                 }
                 else -> {
                     prefs.edit().putString("model_path", f.canonicalPath).putString("model_name", f.name).apply()
@@ -682,9 +687,13 @@ class MainActivity : Activity() {
                     runOnUiThread { restartServer() }
                 }
             }
-            if (slot == "ocr" || slot == "image") {
+            if (slot == "ocr") {
                 JSONObject().put("ok", true)
-                    .put("text", "recorded $slot → ${f.name} (OCR still uses on-device ML Kit; this path is reserved)")
+                    .put("text", "bound ocr → ${f.name} (vision :8082 if mmproj present; else ML Kit fallback)")
+                    .put("path", f.canonicalPath)
+            } else if (slot == "image") {
+                JSONObject().put("ok", true)
+                    .put("text", "recorded image → ${f.name}")
                     .put("path", f.canonicalPath)
             } else {
                 JSONObject().put("ok", true).put("text", "bound $slot → ${f.name} (no copy)").put("path", f.canonicalPath)
@@ -714,11 +723,13 @@ class MainActivity : Activity() {
         }
         "set_file_gates" -> {
             val arr = a.optJSONArray("paths") ?: JSONArray()
-            val list = (0 until arr.length()).mapNotNull {
-                arr.optString(it)?.trim()?.takeIf { s -> s.isNotEmpty() }
+            val list = mutableListOf<String>()
+            for (i in 0 until arr.length()) {
+                val s = arr.optString(i, "").trim()
+                if (s.isNotEmpty()) list.add(s)
             }
-            prefs.edit().putString("file_gates", JSONArray(list).toString()).apply()
-            JSONObject().put("text", "gates saved (${list.size})").put("paths", JSONArray(list))
+            prefs.edit().putString("file_gates", JSONArray(list as Collection<*>).toString()).apply()
+            JSONObject().put("text", "gates saved (${list.size})").put("paths", JSONArray(list as Collection<*>))
         }
         "get_file_gates" -> {
             val raw = prefs.getString("file_gates", "[]") ?: "[]"
@@ -797,6 +808,7 @@ class MainActivity : Activity() {
                 .put("model_external", modelExt || (!prefs.getString("model_path", null).isNullOrBlank() && m.canRead()))
                 .put("server_ready", llama?.ready == true)
                 .put("ocr_path", prefs.getString("ocr_path", null))
+                .put("ocr_ready", llama?.ocrReady == true)
                 .put("ocr_name", prefs.getString("ocr_name", null))
                 .put("image_path", prefs.getString("image_path", null))
                 .put("image_name", prefs.getString("image_name", null))

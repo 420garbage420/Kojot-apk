@@ -13,7 +13,10 @@ import com.google.mlkit.vision.text.TextRecognition
 import com.google.mlkit.vision.text.latin.TextRecognizerOptions
 import org.json.JSONArray
 import org.json.JSONObject
+import java.io.ByteArrayOutputStream
 import java.io.File
+import java.net.HttpURLConnection
+import java.net.URL
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicReference
@@ -64,10 +67,28 @@ class PdfTools(private val rootDir: File, private val appCtx: Context) {
     fun ocrImage(a: JSONObject): JSONObject {
         val f = safe(a.getString("path"))
         if (!f.isFile) throw ToolError("not a file: ${rel(f)}")
+        // Prefer vision GGUF when server is up; still attach ML Kit line boxes when available
+        var visionText: String? = null
+        try {
+            val bmp = android.graphics.BitmapFactory.decodeFile(f.absolutePath)
+            if (bmp != null) {
+                visionText = visionOcrText(bmp)
+                if (!bmp.isRecycled) bmp.recycle()
+            }
+        } catch (_: Exception) {}
         val image = InputImage.fromFilePath(appCtx, android.net.Uri.fromFile(f))
         val detail = recognizeDetailed(image, imgW = 0, imgH = 0, pdfW = 0f, pdfH = 0f, scale = 1f)
-            ?: throw ToolError("OCR failed or ML Kit unavailable")
-        return result(detail.optString("text"), detail.put("path", rel(f)))
+        if (detail == null && visionText.isNullOrBlank()) {
+            throw ToolError("OCR failed (no ML Kit and vision server unavailable)")
+        }
+        val out = detail ?: JSONObject().put("text", "").put("lines", JSONArray()).put("anchors", JSONArray())
+        if (!visionText.isNullOrBlank()) {
+            out.put("text", visionText)
+            out.put("engine", "gguf+mlkit")
+        } else {
+            out.put("engine", "mlkit")
+        }
+        return result(out.optString("text"), out.put("path", rel(f)))
     }
 
     /**
@@ -98,8 +119,15 @@ class PdfTools(private val rootDir: File, private val appCtx: Context) {
                         Bitmap.Config.ARGB_8888
                     )
                     page.render(bmp, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
+                    val visionText = visionOcrText(bmp)
                     val detail = recognizeDetailed(InputImage.fromBitmap(bmp, 0), bmp.width, bmp.height, pdfW, pdfH, scale)
                         ?: JSONObject().put("text", "").put("lines", JSONArray()).put("anchors", JSONArray())
+                    if (!visionText.isNullOrBlank()) {
+                        detail.put("text", visionText)
+                        detail.put("engine", "gguf+mlkit")
+                    } else {
+                        detail.put("engine", "mlkit")
+                    }
                     bmp.recycle()
 
                     val pageNo = i + 1
@@ -109,6 +137,7 @@ class PdfTools(private val rootDir: File, private val appCtx: Context) {
                         .put("height", pdfH.toDouble())
                         .put("text", detail.optString("text"))
                         .put("chars", detail.optString("text").length)
+                        .put("engine", detail.optString("engine", "mlkit"))
                         .put("lines", detail.optJSONArray("lines") ?: JSONArray())
                         .put("anchors", detail.optJSONArray("anchors") ?: JSONArray())
                     pages.put(pageObj)
@@ -134,10 +163,16 @@ class PdfTools(private val rootDir: File, private val appCtx: Context) {
                 }
             }
             val more = renderer.pageCount - n
+            val engines = mutableSetOf<String>()
+            for (i in 0 until pages.length()) {
+                val e = pages.optJSONObject(i)?.optString("engine", "mlkit") ?: "mlkit"
+                engines.add(e)
+            }
             val summary = buildString {
                 append("OCR ${rel(f)}: ${renderer.pageCount} pages")
                 if (more > 0) append(" (first $n OCR'd, $more skipped)")
-                append(", ${allLines.length()} lines, ${anchors.length()} fill anchors\n")
+                append(", ${allLines.length()} lines, ${anchors.length()} fill anchors")
+                append(" [engine: ${engines.joinToString("+")}]\n")
                 append(if (sb.isBlank()) "(no text recognized)" else sb.toString())
             }
             return result(summary, JSONObject()
@@ -179,6 +214,73 @@ class PdfTools(private val rootDir: File, private val appCtx: Context) {
      * @param scale bitmap pixels per PDF point (same on x and y when rendering uniformly)
      * When pdfW/pdfH are 0, boxes stay in image pixel space (top-left origin).
      */
+    /** True when optional OCR llama-server is up on :8082. */
+    private fun ocrServerUp(): Boolean {
+        return try {
+            val c = URL("http://127.0.0.1:8082/health").openConnection() as HttpURLConnection
+            c.connectTimeout = 400
+            c.readTimeout = 400
+            c.responseCode == 200
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    private fun bitmapToJpegB64(bmp: Bitmap, quality: Int = 85): String {
+        val baos = ByteArrayOutputStream()
+        bmp.compress(Bitmap.CompressFormat.JPEG, quality, baos)
+        return Base64.encodeToString(baos.toByteArray(), Base64.NO_WRAP)
+    }
+
+    /**
+     * Vision OCR via optional GGUF server (:8082 + mmproj).
+     * Returns plain text (no line boxes). Caller merges with ML Kit geometry when needed.
+     */
+    private fun visionOcrText(bmp: Bitmap): String? {
+        if (!ocrServerUp()) return null
+        return try {
+            val b64 = bitmapToJpegB64(bmp)
+            val body = JSONObject()
+                .put("model", "local")
+                .put("max_tokens", 2048)
+                .put("temperature", 0.1)
+                .put("messages", JSONArray().put(
+                    JSONObject().put("role", "user").put("content", JSONArray()
+                        .put(JSONObject()
+                            .put("type", "image_url")
+                            .put("image_url", JSONObject().put("url", "data:image/jpeg;base64,$b64")))
+                        .put(JSONObject()
+                            .put("type", "text")
+                            .put("text", "Extract ALL readable text from this document image. Preserve reading order and line breaks. Output plain text only — no markdown fences, no commentary."))
+                    )
+                ))
+            val bytes = body.toString().toByteArray(Charsets.UTF_8)
+            val c = URL("http://127.0.0.1:8082/v1/chat/completions").openConnection() as HttpURLConnection
+            c.requestMethod = "POST"
+            c.connectTimeout = 5000
+            c.readTimeout = 120_000
+            c.doOutput = true
+            c.setRequestProperty("Content-Type", "application/json")
+            c.outputStream.use { it.write(bytes) }
+            val code = c.responseCode
+            val stream = if (code in 200..299) c.inputStream else c.errorStream
+            val resp = stream?.bufferedReader()?.readText() ?: return null
+            if (code !in 200..299) {
+                Log.w(TAG, "vision OCR HTTP $code: ${resp.take(200)}")
+                return null
+            }
+            val j = JSONObject(resp)
+            val choices = j.optJSONArray("choices") ?: return null
+            if (choices.length() == 0) return null
+            val msg = choices.getJSONObject(0).optJSONObject("message")
+            val content = msg?.optString("content")?.trim().orEmpty()
+            if (content.isBlank()) null else content
+        } catch (e: Exception) {
+            Log.w(TAG, "vision OCR failed: ${e.message}")
+            null
+        }
+    }
+
     private fun recognizeDetailed(
         image: InputImage,
         imgW: Int,
