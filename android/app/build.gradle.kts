@@ -9,7 +9,6 @@ android {
     }
     signingConfigs {
         getByName("debug") {
-            // Prefer project debug.keystore when present; otherwise let Gradle use its default
             val ks = file("debug.keystore")
             if (ks.exists()) {
                 storeFile = ks
@@ -24,5 +23,6 @@ android {
     kotlinOptions { jvmTarget = "17" }
 }
 dependencies {
-    // apksig removed — on-device APK compiler archived to compiler-standalone/
+    // Optional on-device OCR for scanned PDFs / images (Play Services ML Kit)
+    implementation("com.google.mlkit:text-recognition:16.0.1")
 }

@@ -191,6 +191,18 @@ class MainActivity : Activity() {
         else assets.open("index.html").use { i -> File(www, "index.html").outputStream().use { i.copyTo(it) } }
     }
 
+    private fun copyAssetDir(assetPath: String, dest: File) {
+        val list = assets.list(assetPath) ?: emptyArray()
+        if (list.isEmpty()) {
+            assets.open(assetPath).use { i -> dest.outputStream().use { i.copyTo(it) } }
+            return
+        }
+        dest.mkdirs()
+        for (name in list) {
+            val childAsset = if (assetPath.isEmpty()) name else "$assetPath/$name"
+            copyAssetDir(childAsset, File(dest, name))
+        }
+    }
 
     private fun pickModel() {
         tap = { pickModel() }
@@ -538,6 +550,10 @@ class MainActivity : Activity() {
             } else {
                 mem().run(op, a)
             }
+        }
+        in PdfTools.OPS -> {
+            if (!filesOk()) throw ToolError("Files access isn't granted yet. Open Settings → Tools → Files and tap Grant.")
+            PdfTools(rootDir(), applicationContext).run(op, a)
         }
         else -> {
             if (!filesOk()) throw ToolError("Files access isn't granted yet. Open Settings → Tools → Files and tap Grant.")
