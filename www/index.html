@@ -1829,40 +1829,77 @@ const PDF = {
   },
 
   async loadScript(src){
-    if(document.querySelector('script[data-pdfsrc="'+src+'"]')) return;
+    if(document.querySelector('script[data-pdfsrc="'+src+'"]')) {
+      // already requested — wait until global appears for known libs
+      return;
+    }
     await new Promise((res,rej)=>{
       const s=document.createElement('script');
-      s.src=src; s.async=true; s.dataset.pdfsrc=src;
+      s.src=src; s.async=false; s.dataset.pdfsrc=src;
       s.onload=()=>res();
-      s.onerror=()=>rej(Error('Failed to load '+src.split('/').pop()));
+      s.onerror=()=>rej(Error('Failed to load '+src));
       document.head.appendChild(s);
     });
   },
 
   async ensureLibs(){
     if(this.libsReady && typeof pdfjsLib!=='undefined' && typeof PDFLib!=='undefined') return;
-    const pdfjsCdn = [
-      'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js',
-      'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js'
-    ];
-    const workerCdn = [
-      'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js',
-      'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js'
-    ];
-    const libCdn = [
-      'https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js',
-      'https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/dist/pdf-lib.min.js'
-    ];
-    if(typeof pdfjsLib==='undefined'){
+    const loadLocal = async (src)=>{
+      // Prefer same-origin vendor (bundled offline). Fall back to CDN.
+      const locals = ['./vendor/'+src, 'vendor/'+src, '/vendor/'+src];
       let last;
-      for(const u of pdfjsCdn){ try{ await this.loadScript(u); last=null; break; }catch(e){ last=e; } }
-      if(last) throw last;
-      pdfjsLib.GlobalWorkerOptions.workerSrc = workerCdn[0];
+      for(const u of locals){
+        try{ await this.loadScript(u); return; }catch(e){ last=e; }
+      }
+      throw last || Error('local '+src);
+    };
+    if(typeof pdfjsLib==='undefined'){
+      try{
+        await loadLocal('pdf.min.js');
+      }catch(_){
+        const cdns = [
+          'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js',
+          'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js'
+        ];
+        let last;
+        for(const u of cdns){ try{ await this.loadScript(u); last=null; break; }catch(e){ last=e; } }
+        if(last) throw Error('pdf.js failed to load (offline?). '+last.message);
+      }
+      if(typeof pdfjsLib==='undefined') throw Error('pdf.js loaded but pdfjsLib global missing');
+      // worker: local first
+      const workers = ['./vendor/pdf.worker.min.js','vendor/pdf.worker.min.js','/vendor/pdf.worker.min.js',
+        'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js'];
+      pdfjsLib.GlobalWorkerOptions.workerSrc = workers[0];
+      // probe worker exists via fetch; if not, try next
+      for(const w of workers){
+        try{
+          const r = await fetch(w, {method:'HEAD'});
+          if(r.ok){ pdfjsLib.GlobalWorkerOptions.workerSrc = w; break; }
+        }catch(_){
+          try{
+            const r = await fetch(w, {method:'GET'});
+            if(r.ok){ pdfjsLib.GlobalWorkerOptions.workerSrc = w; break; }
+          }catch(__){}
+        }
+      }
     }
     if(typeof PDFLib==='undefined'){
-      let last;
-      for(const u of libCdn){ try{ await this.loadScript(u); last=null; break; }catch(e){ last=e; } }
-      if(last) throw last;
+      try{
+        await loadLocal('pdf-lib.min.js');
+      }catch(_){
+        const cdns = [
+          'https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js',
+          'https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/dist/pdf-lib.min.js'
+        ];
+        let last;
+        for(const u of cdns){ try{ await this.loadScript(u); last=null; break; }catch(e){ last=e; } }
+        if(last) throw Error('pdf-lib failed to load. '+last.message);
+      }
+      // UMD may need a tick
+      if(typeof PDFLib==='undefined' && typeof window!=='undefined'){
+        await new Promise(r=>setTimeout(r,50));
+      }
+      if(typeof PDFLib==='undefined') throw Error('pdf-lib loaded but PDFLib is undefined');
     }
     this.libsReady = true;
   },
@@ -1918,8 +1955,15 @@ const PDF = {
     $('#pdf-title').textContent = path.split('/').pop();
 
     // Viewer (pdf.js) — never touches the LLM
-    this.doc = await pdfjsLib.getDocument({data: raw.slice()}).promise;
+    try{
+      this.doc = await pdfjsLib.getDocument({data: raw.slice()}).promise;
+    }catch(e){
+      // Worker failed (common on file/odd origins) — run on main thread
+      try{ pdfjsLib.GlobalWorkerOptions.workerSrc = ''; pdfjsLib.disableWorker = true; }catch(_){}
+      this.doc = await pdfjsLib.getDocument({data: raw.slice()}).promise;
+    }
     // Editor (pdf-lib)
+    if(typeof PDFLib==='undefined') throw Error('PDFLib is undefined — vendor/pdf-lib.min.js not served. Rebuild APK with www/vendor.');
     this.libDoc = await PDFLib.PDFDocument.load(raw.slice(), {ignoreEncryption:true, updateMetadata:false});
     this.page = 1;
     this.setHasDoc(true);

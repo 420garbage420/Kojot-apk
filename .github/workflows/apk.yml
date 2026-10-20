@@ -58,6 +58,8 @@ jobs:
           # Full offline tree: index.html + vs/ (Monaco)
           cp www/index.html android/app/src/main/assets/www/index.html
           cp -a www/vs android/app/src/main/assets/www/vs
+          # Offline PDF libs (pdf.js + pdf-lib)
+          if [ -d www/vendor ]; then cp -a www/vendor android/app/src/main/assets/www/vendor; fi
           # Keep a flat fallback for older packaging paths
           cp www/index.html android/app/src/main/assets/index.html
 
