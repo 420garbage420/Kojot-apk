@@ -346,7 +346,7 @@ class LlamaService : Service() {
             .setContentIntent(open)
             .setOngoing(true)
             .setOnlyAlertOnce(true)
-            .addAction(Notification.Action.Builder(null, "Stop", stop).build())
+            .addAction(Notification.Action.Builder(0, "Stop", stop).build())
             .build()
     }
 

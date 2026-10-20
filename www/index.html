@@ -1754,7 +1754,7 @@ if(!$('#fs-t'))return;ninfo();const ok=NI&&NI.files;$('#fs-t').textContent=!NI?'
 }
 function sheet(o){
   setTimeout(syncBack, 10);$('#ss').classList.toggle('open',o);if(o){drawer(false);ninfo();buildSettings()}}
-function done(){saveCfg();sheet(false);ping();syncVisionUI();
+function done(){saveCfg();sheet(false);ping();syncVisionUI()}
 
 /* ========== PDF viewer, form fill, OCR, AI fill ========== */
 const PDF = {
@@ -2097,7 +2097,6 @@ $('#pdf-btn-ai')?.addEventListener('click',async()=>{
 
 
 try{Cap.offerResume()}catch(_){}
-}
 $('#s-body').addEventListener('input',e=>{const el=e.target.closest('[data-k]');if(!el)return;const t=el.dataset.t,key=el.dataset.k;let v=el.value;
  if(t==='num'||t==='int'||t==='sel'){v=v===''?undefined:+v;if(Number.isNaN(v))v=undefined}else if(t==='tf')v=v===''?undefined:v==='true';else if(v===''&&/^(p|srv)\./.test(key))v=undefined;
  if(key==='search.max'&&v!==undefined)v=Math.max(1,Math.min(10,v));let effKey = key;

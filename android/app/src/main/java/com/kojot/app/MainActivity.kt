@@ -175,7 +175,13 @@ class MainActivity : Activity() {
 
     private fun bindAndStartService() {
         LlamaService.start(this)
-        bindService(Intent(this, LlamaService::class.java), conn, Context.BIND_AUTO_CREATE)
+        if (!bound) {
+            bindService(Intent(this, LlamaService::class.java), conn, Context.BIND_AUTO_CREATE)
+        } else {
+            // Already bound — just ensure processes are up
+            prepareWww()
+            if (llama?.isChatAlive() != true) llama?.startServers()
+        }
     }
 
     private fun showWeb() {
@@ -581,12 +587,15 @@ class MainActivity : Activity() {
                 .put("srv_coder", try { JSONObject(prefs.getString("srv_coder", "{}") ?: "{}") } catch (_: Exception) { JSONObject() })
                 .put("embed", embReady || (memory?.embOnline == true))
                 .put("embed_model", embPresent)
+                .put("emb_name", prefs.getString("emb_name", null))
                 .put("coder_model", coderModel.exists())
+                .put("coder_name", prefs.getString("coder_name", null))
                 .put("active_slot", activeSlot)
                 .put("model_present", m.isFile)
                 .put("model_name", prefs.getString("model_name", null) ?: m.name)
                 .put("model_path", m.path)
                 .put("model_external", !external.isNullOrBlank() && File(external).canRead())
+                .put("server_ready", llama?.ready == true)
                 .toString()
         }
 
