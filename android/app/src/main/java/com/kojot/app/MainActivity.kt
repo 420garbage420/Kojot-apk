@@ -351,38 +351,76 @@ class MainActivity : Activity() {
 
     /**
      * Resolve a real filesystem path from a content/file URI so we never copy multi-GB GGUFs.
-     * Tries MediaStore, DocumentsContract tree paths, and common Download/Local Models layouts.
+     * Samsung/SAF often hide MediaStore DATA — use DocumentsContract + recursive name search.
      */
     private fun resolveRealPath(uri: Uri, displayName: String? = null): String? {
+        fun readable(f: File?): String? =
+            try { if (f != null && f.isFile && f.canRead()) f.canonicalPath else null } catch (_: Exception) { null }
+
         try {
             if ("file".equals(uri.scheme, ignoreCase = true)) {
-                val p = uri.path
-                if (!p.isNullOrBlank() && File(p).canRead()) return p
+                readable(File(uri.path ?: return null))?.let { return it }
             }
+
+            // MediaStore / openable columns (often null on scoped storage)
             contentResolver.query(uri, arrayOf(android.provider.MediaStore.MediaColumns.DATA), null, null, null)?.use { c ->
                 if (c.moveToFirst()) {
                     val idx = c.getColumnIndex(android.provider.MediaStore.MediaColumns.DATA)
-                    if (idx >= 0) {
-                        val path = c.getString(idx)
-                        if (!path.isNullOrBlank() && File(path).canRead()) return path
-                    }
+                    if (idx >= 0) readable(File(c.getString(idx) ?: ""))?.let { return it }
                 }
             }
             contentResolver.query(uri, null, null, null, null)?.use { c ->
                 if (c.moveToFirst()) {
-                    for (col in arrayOf("_data", "filePath", "path")) {
+                    for (col in arrayOf("_data", "filePath", "path", android.provider.MediaStore.MediaColumns.DATA)) {
                         val idx = c.getColumnIndex(col)
-                        if (idx >= 0) {
-                            val path = c.getString(idx)
-                            if (!path.isNullOrBlank() && File(path).canRead()) return path
-                        }
+                        if (idx >= 0) readable(File(c.getString(idx) ?: ""))?.let { return it }
                     }
                 }
             }
-            // Heuristic: Downloads / Local Models / same folder as models_dir
+
+            // DocumentsContract: primary:Download/Local Models/foo.gguf  or  raw:/storage/...
+            val docId = try {
+                android.provider.DocumentsContract.getDocumentId(uri)
+            } catch (_: Exception) { null }
+            if (!docId.isNullOrBlank()) {
+                when {
+                    docId.startsWith("raw:") -> {
+                        readable(File(docId.removePrefix("raw:")))?.let { return it }
+                    }
+                    docId.startsWith("msd:") -> {
+                        // Some OEMs
+                        readable(File(docId.substringAfter(':')))?.let { return it }
+                    }
+                    docId.contains(':') -> {
+                        val rel = java.net.URLDecoder.decode(docId.substringAfter(':'), "UTF-8")
+                            .replace(':', '/')
+                        val primary = File(Environment.getExternalStorageDirectory(), rel)
+                        readable(primary)?.let { return it }
+                        // Also try as absolute if it already looks like one
+                        if (rel.startsWith('/')) readable(File(rel))?.let { return it }
+                    }
+                }
+            }
+
+            // URI path segment decode (content://com.android.externalstorage.documents/document/primary%3A...)
+            uri.lastPathSegment?.let { seg ->
+                val decoded = try { java.net.URLDecoder.decode(seg, "UTF-8") } catch (_: Exception) { seg }
+                if (decoded.contains(':')) {
+                    val rel = decoded.substringAfter(':').replace(':', '/')
+                    readable(File(Environment.getExternalStorageDirectory(), rel))?.let { return it }
+                }
+                if (decoded.startsWith("/storage/") || decoded.startsWith("/sdcard/")) {
+                    readable(File(decoded))?.let { return it }
+                }
+            }
+
+            // Name-based search: models folder (recursive) + Downloads
             val name = displayName?.takeIf { it.isNotBlank() }
-            if (name != null) {
-                val candidates = listOf(
+                ?: uri.lastPathSegment?.substringAfterLast('/')?.substringAfterLast(':')
+                    ?.let { try { java.net.URLDecoder.decode(it, "UTF-8") } catch (_: Exception) { it } }
+            if (!name.isNullOrBlank() && name.endsWith(".gguf", ignoreCase = true)) {
+                // Direct candidates
+                val direct = listOf(
                     File(modelsDir(), name),
                     File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), name),
                     File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), "Local Models/$name"),
@@ -391,18 +429,25 @@ class MainActivity : Activity() {
                     File(Environment.getExternalStorageDirectory(), "Downloads/$name"),
                     File(Environment.getExternalStorageDirectory(), "Downloads/Local Models/$name")
                 )
-                for (f in candidates) {
-                    if (f.isFile && f.canRead()) return f.canonicalPath
+                for (f in direct) readable(f)?.let { return it }
+
+                // Recursive under modelsDir (llm/embed/coder/ocr/…) and Download/Local Models
+                fun findNamed(root: File, depth: Int = 0): File? {
+                    if (depth > 4 || !root.isDirectory) return null
+                    val kids = root.listFiles() ?: return null
+                    for (k in kids) {
+                        if (k.isFile && k.name.equals(name, ignoreCase = true)) return k
+                    }
+                    for (k in kids) {
+                        if (k.isDirectory && !k.name.startsWith(".")) {
+                            findNamed(k, depth + 1)?.let { return it }
+                        }
+                    }
+                    return null
                 }
-            }
-            // Document tree primary: content://.../document/primary%3ADownload%2FLocal%20Models%2Ffoo.gguf
-            val docId = try {
-                android.provider.DocumentsContract.getDocumentId(uri)
-            } catch (_: Exception) { null }
-            if (!docId.isNullOrBlank() && docId.contains(':')) {
-                val rel = docId.substringAfter(':').replace(':', '/')
-                val primary = File(Environment.getExternalStorageDirectory(), rel)
-                if (primary.isFile && primary.canRead()) return primary.canonicalPath
+                readable(findNamed(modelsDir()))?.let { return it }
+                val dlLocal = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), "Local Models")
+                readable(findNamed(dlLocal))?.let { return it }
             }
         } catch (_: Exception) {}
         return null
@@ -433,12 +478,11 @@ class MainActivity : Activity() {
                 REQ_EMB -> {
                     if (llama != null) llama?.restartServers() else bindAndStartService()
                 }
-                REQ_CODER -> {
-                    if (llama != null) llama?.restartServers() else bindAndStartService()
-                }
+                // Coder: path only — loads on demand via ensure_slot (avoids full restart OOM)
+                REQ_CODER -> { /* no process start */ }
             }
             try {
-                web.evaluateJavascript("try{window.ninfo&&window.ninfo()}catch(e){}", null)
+                web.evaluateJavascript("try{window.ninfo&&window.ninfo();if(window.filesUI)filesUI()}catch(e){}", null)
             } catch (_: Exception) {}
         }
     }
@@ -471,13 +515,20 @@ class MainActivity : Activity() {
             return
         }
 
-        // Last resort: refuse silent multi-GB copy — ask user to put file under models folder
+        // Last resort: refuse silent multi-GB copy — guide to in-app list (real paths)
         val dir = modelsDir().path
         runOnUiThread {
-            msg.text = "Could not resolve a real path (no copy).\nPut the .gguf in:\n$dir\nthen pick it again — or use Settings → Models folder."
+            msg.text = "Could not resolve a real path (no copy).\nPut the .gguf in:\n$dir\n(or llm/ embed/ coder/ ocr/ subfolders)\nthen use Settings → Models list → Chat/Coder/Embed/OCR buttons.\nSystem file picker often fails on Samsung SAF."
             try {
                 web.evaluateJavascript(
-                    "try{alert(${JSONObject.quote("Could not use model in-place. Copy it into your Models folder:\\n$dir\\nthen Switch model again. Kojot will not create a second multi-GB copy.")})}catch(e){}",
+                    "try{alert(${JSONObject.quote(
+                        "Could not map that file to a real path (Samsung/Android blocks it).\\n\\n" +
+                        "1. Copy or move the .gguf into:\\n$dir\\n" +
+                        "   (subfolders llm, embed, coder, ocr are fine)\\n" +
+                        "2. Open Settings → Models folder → Refresh\\n" +
+                        "3. Tap Chat / Coder / Embed / OCR on the model card\\n\\n" +
+                        "Kojot will not create a second multi-GB copy."
+                    )})}catch(e){}",
                     null
                 )
             } catch (_: Exception) {}
