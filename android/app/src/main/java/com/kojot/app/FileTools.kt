@@ -305,6 +305,23 @@ class FileTools(rootDir: File, private val gates: List<String> = emptyList()) {
         return result("edited ${rel(f)} (replaced 1 block)")
     }
 
+    fun rename(a: JSONObject): JSONObject {
+        val path = a.optString("path").trim()
+        val newName = a.optString("name").trim().ifBlank { a.optString("new_name").trim() }
+        if (path.isEmpty() || newName.isEmpty()) throw ToolError("path and name are required")
+        if (newName.contains('/') || newName.contains('\\')) throw ToolError("name must not contain path separators")
+        val src = safe(path)
+        if (!src.exists()) throw ToolError("not found: ${rel(src)}")
+        if (src == root) throw ToolError("refused: cannot rename workspace root")
+        val dest = File(src.parentFile, newName)
+        if (dest.exists()) throw ToolError("already exists: ${rel(dest)}")
+        if (!src.renameTo(dest)) {
+            src.copyRecursively(dest, true)
+            src.deleteRecursively()
+        }
+        return result("renamed ${rel(src)} → ${rel(dest)}", JSONObject().put("path", rel(dest)).put("from", rel(src)))
+    }
+
     fun run(op: String, a: JSONObject): JSONObject = when (op) {
         "list_dir" -> listDir(a)
         "find_files" -> find(a)
@@ -313,6 +330,7 @@ class FileTools(rootDir: File, private val gates: List<String> = emptyList()) {
         "move" -> moveCopy(a, false)
         "copy" -> moveCopy(a, true)
         "delete" -> delete(a)
+        "rename" -> rename(a)
         "write_file" -> write(a)
         "edit_file" -> edit(a)
         else -> throw ToolError("unknown tool: $op")

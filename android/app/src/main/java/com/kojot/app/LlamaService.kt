@@ -236,27 +236,19 @@ class LlamaService : Service() {
                 out.put("stopped_ocr", prevOcr)
             }
             "ocr", "vision" -> {
-                // Only pause chat when a vision GGUF+mmproj can actually start
+                // Do NOT kill chat for OCR (that caused minimize/reset). Try vision alongside chat;
+                // PdfTools falls back to ML Kit if :8082 is down.
                 val ocrFile = ocrModelFile()
                 val canVision = ocrFile.isFile && findMmproj(ocrFile) != null
-                if (canVision && proc?.isAlive == true) {
-                    slotBeforeOcr = activeSlot
-                    try {
-                        proc?.destroy()
-                        try { proc?.waitFor() } catch (_: Exception) {}
-                    } catch (_: Exception) {}
-                    proc = null
-                    ready = false
-                    promoteForeground("Pausing chat for OCR…")
-                }
-                val ok = if (canVision) ensureOcr(60_000L) else false
+                val ok = if (canVision) {
+                    try { ensureOcr(45_000L) } catch (_: Exception) { false }
+                } else false
                 JSONObject()
-                    .put("ok", ok || !canVision) // ML Kit path is fine without vision server
+                    .put("ok", true)
                     .put("slot", "ocr")
                     .put("ocr_ready", ok)
-                    .put("paused_slot", slotBeforeOcr)
-                    .put("mlkit", !canVision)
-                    .put("text", if (ok) "OCR vision ready" else "OCR via ML Kit (no vision GGUF/mmproj)")
+                    .put("mlkit", !ok)
+                    .put("text", if (ok) "OCR vision :8082 ready" else "OCR via ML Kit")
             }
             "chat_resume", "resume" -> {
                 stopOcr()

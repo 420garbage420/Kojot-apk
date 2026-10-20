@@ -471,6 +471,64 @@ class MemoryTools(private val dbFile: File, private val workspace: () -> File) {
         return result("indexed $path")
     }
 
+    /** Index only the given relative paths (files or folders walked one level deep for files). */
+    fun indexPaths(a: JSONObject): JSONObject {
+        val root = workspace()
+        val arr = a.optJSONArray("paths")
+        val single = a.optString("path", "").trim()
+        val paths = mutableListOf<String>()
+        if (arr != null) {
+            for (i in 0 until arr.length()) {
+                val s = arr.optString(i, "").trim()
+                if (s.isNotEmpty()) paths.add(s)
+            }
+        }
+        if (single.isNotEmpty()) paths.add(single)
+        if (paths.isEmpty()) throw ToolError("paths required")
+        if (!embOnline && !checkEmbedding()) throw ToolError("embedding server offline — bind an embed model first")
+        var indexed = 0
+        var skipped = 0
+        val errors = ArrayList<String>()
+        fun tryIndex(f: File) {
+            try {
+                if (!f.isFile || !isTextFile(f)) { skipped++; return }
+                indexFile(f, root)
+                indexed++
+            } catch (e: Exception) {
+                errors.add("${f.name}: ${e.message}")
+                skipped++
+            }
+        }
+        for (p in paths) {
+            val f = try {
+                val rel = p.trim().trimStart('/')
+                val cand = if (rel.isEmpty() || rel == ".") root else File(root, rel)
+                cand.canonicalFile
+            } catch (_: Exception) { null }
+            if (f == null || !f.exists()) {
+                errors.add("not found: $p")
+                continue
+            }
+            if (f.isFile) tryIndex(f)
+            else if (f.isDirectory) {
+                f.listFiles()?.forEach { child ->
+                    if (child.isFile) tryIndex(child)
+                    else if (child.isDirectory) {
+                        // one level of subdirs for convenience
+                        child.listFiles()?.filter { it.isFile }?.forEach { tryIndex(it) }
+                    }
+                }
+            }
+        }
+        return result(
+            "indexed $indexed file(s), skipped $skipped" + if (errors.isNotEmpty()) " · errors: ${errors.take(3).joinToString()}" else "",
+            JSONObject()
+                .put("indexed", indexed)
+                .put("skipped", skipped)
+                .put("errors", JSONArray(errors.take(8)))
+        )
+    }
+
     fun syncFileIndex(a: JSONObject): JSONObject {
         val root = workspace()
         if (!root.isDirectory) throw ToolError("workspace not a directory")
@@ -584,6 +642,7 @@ class MemoryTools(private val dbFile: File, private val workspace: () -> File) {
         "recall_files" -> recallFiles(a)
         "sync_file_index" -> syncFileIndex(a)
         "start_indexing" -> startIndexing(a.optBoolean("force", false), a.optInt("max", 10000))
+        "index_paths" -> indexPaths(a)
         "get_indexing_status" -> JSONObject().put("text", "status").put("data", getIndexingStatus())
         "cancel_indexing" -> cancelIndexing()
         "list_facts" -> listFacts(a)

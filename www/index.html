@@ -554,20 +554,28 @@ textarea.in{height:auto;min-height:64px;padding:9px 12px;font:13px/19px var(--mo
 </div>
 <div id="ed-toast"></div>
 
-<!-- ===== File Viewer ===== -->
+<!-- ===== File Manager (Material Files-inspired) ===== -->
 <div id="fv-view">
  <div id="fv-header">
   <button class="ib" id="fv-back" aria-label="Back"><svg viewBox="0 0 24 24"><path d="M15 6l-6 6 6 6"/></svg></button>
-  <div class="path" id="fv-path">.</div>
-  <button class="ib" id="fv-up" aria-label="Up" title="Parent folder"><svg viewBox="0 0 24 24"><path d="M12 19V5M5 12l7-7 7 7"/></svg></button>
+  <div class="path" id="fv-path" title="Current folder">Internal storage</div>
   <button class="ib" id="fv-x" aria-label="Close"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
  </div>
+ <div id="fv-crumbs" style="display:flex;flex-wrap:wrap;gap:4px;padding:6px 10px;border-bottom:1px solid var(--line);font-size:12px;background:var(--bg-subtle)"></div>
  <div id="fv-toolbar">
   <button class="fbtn" id="fv-refresh">Refresh</button>
   <button class="fbtn" id="fv-mkdir">New folder</button>
-  <button class="fbtn" id="fv-sort">Sort: name</button>
-  <button class="fbtn" id="fv-gates">AI gates</button>
+  <button class="fbtn" id="fv-sort">Sort</button>
+  <button class="fbtn" id="fv-select-all">Select</button>
+  <button class="fbtn" id="fv-copy" disabled>Copy</button>
+  <button class="fbtn" id="fv-cut" disabled>Cut</button>
+  <button class="fbtn" id="fv-paste" disabled>Paste</button>
+  <button class="fbtn" id="fv-rename" disabled>Rename</button>
+  <button class="fbtn danger" id="fv-delete" disabled>Delete</button>
+  <button class="fbtn" id="fv-embed" disabled title="Embed selected into memory">Embed</button>
+  <button class="fbtn" id="fv-home">Root</button>
  </div>
+ <div id="fv-status" style="font-size:11px;color:var(--fg-3);padding:4px 12px;border-bottom:1px solid var(--line)"></div>
  <div id="fv-list"></div>
 </div>
 <div class="fv-preview" id="fv-preview">
@@ -1957,9 +1965,11 @@ if(!$('#fs-t'))return;ninfo();const ok=NI&&NI.files;$('#fs-t').textContent=!NI?'
     if($('#coder-del')) $('#coder-del').style.display = 'none';
   }
   if ($('#coder-t')) { $('#coder-t').value = String(cfg.coder_t || 0.1); $('#coder-t-lbl').textContent = (+cfg.coder_t || 0.1).toFixed(2); }
-  if (NI && NI.emb_name) {
+  if (NI && NI.embed_model) {
+    const en=(NI.emb_name||'embed').replace(/\.gguf$/i,'');
     $('#mem-emb').textContent = 'Change Embed Model';
     if($('#mem-emb-del')) $('#mem-emb-del').style.display = 'inline-block';
+    if($('#mem-m')){ $('#mem-m').style.color='var(--success)'; $('#mem-m').textContent='Active: '+en+(NI.emb_path?' · '+(NI.emb_path.split('/').pop()):'')+(NI.embed?' · online':' · starting…'); }
   } else {
     $('#mem-emb').textContent = 'Install embed model';
     if($('#mem-emb-del')) $('#mem-emb-del').style.display = 'none';
@@ -2880,7 +2890,13 @@ $('#s-body').addEventListener('click',async e=>{const t=e.target;let b;
  }
  if(t.closest('#mem-view')){const m=$('#mem-m');m.style.color='var(--fg-2)';m.textContent='Loading…';try{const r=JSON.parse(await nat('list_facts',{limit:30}));m.style.color='var(--fg-2)';m.textContent=r.text||'(empty)'}catch(x){m.style.color='var(--danger)';m.textContent=x.message}return}
  if(t.closest('#mem-clear')){if(!confirm('Clear all stored facts?'))return;const m=$('#mem-m');try{const r=JSON.parse(await nat('clear_facts',{}));m.style.color='var(--success)';m.textContent=r.text}catch(x){m.style.color='var(--danger)';m.textContent=x.message}return}
- if(t.closest('#mem-emb')){try{await nat('pick_embedding',{});const m=$('#mem-m');m.style.color='var(--fg-2)';m.textContent='Pick nomic-embed-text GGUF…'}catch(x){$('#mem-m').textContent=x.message}return}
+ if(t.closest('#mem-emb')){
+   // Prefer Models list (real paths). SAF picker often fails on Samsung.
+   const m=$('#mem-m');
+   if(m){m.style.color='var(--fg-2)';m.textContent='Tip: Settings → Models list → tap Embed on a GGUF under embed/. SAF picker is a fallback.';}
+   try{await nat('pick_embedding',{}); ninfo(); filesUI();}catch(x){if(m)m.textContent=x.message}
+   return;
+ }
  if(t.closest('#mem-anchor-save')){const m=$('#mem-m');const text=$('#mem-anchor').value.trim();try{const r=JSON.parse(await nat('set_user_anchor',{text}));m.style.color='var(--success)';m.textContent=r.text}catch(x){m.style.color='var(--danger)';m.textContent=x.message}return}
  if(t.closest('#vit-check')){
    const m=$('#vit-m');
@@ -3696,7 +3712,6 @@ async function refreshModelsList(){
           <button class="btn sm" data-bind-model="coder" data-path="${ea(m.path)}">Coder</button>
           <button class="btn sm" data-bind-model="emb" data-path="${ea(m.path)}">Embed</button>
           <button class="btn sm" data-bind-model="ocr" data-path="${ea(m.path)}">OCR</button>
-          <button class="btn sm" data-bind-model="image" data-path="${ea(m.path)}">Image</button>
         </div>
       </div>`;
     }).join('');
@@ -3869,20 +3884,27 @@ const Convert = {
   }
 };
 
-/* ========== File Viewer (Material Files-inspired) ========== */
+/* ========== File Manager (Material Files-style: breadcrumbs, multi-select, clipboard) ========== */
 const FV = {
   path: '.',
   sort: 'name',
-  selected: null,
+  selected: new Set(),
+  clipboard: null, // {mode:'copy'|'cut', paths:[]}
   gates: [],
+  entries: [],
   async show(on){
     const v=$('#fv-view');
-    if(!v)return;
+    if(!v){ console.error('fv-view missing'); return; }
     if(on){
-      drawer(false);
-      showEditor(false);
-      if(typeof showPdf==='function') showPdf(false);
+      try{ drawer(false); }catch(_){}
+      try{ showEditor(false); }catch(_){}
+      try{ if(typeof showPdf==='function') showPdf(false); }catch(_){}
+      try{ ninfo(); }catch(_){}
+      // Start at workspace root Kojot can see
+      if(NI && NI.root) this.path = '.';
       v.classList.add('open');
+      this.selected.clear();
+      this.syncBar();
       this.render();
     } else {
       v.classList.remove('open');
@@ -3898,41 +3920,86 @@ const FV = {
       return rel===gg || rel.startsWith(gg+'/');
     });
   },
+  crumbs(){
+    const box=$('#fv-crumbs'); if(!box)return;
+    const parts=(this.path==='.'||!this.path)?[]:this.path.split('/').filter(Boolean);
+    let acc='';
+    const bits=['<button type="button" data-cr="." style="border:0;background:none;color:var(--cyan);font:inherit;padding:2px 4px;cursor:pointer">root</button>'];
+    parts.forEach((part,i)=>{
+      acc=acc?acc+'/'+part:part;
+      const p=acc;
+      bits.push('<span style="color:var(--fg-3)">/</span>');
+      bits.push(`<button type="button" data-cr="${ea(p)}" style="border:0;background:none;color:var(--cyan);font:inherit;padding:2px 4px;cursor:pointer">${esc(part)}</button>`);
+    });
+    box.innerHTML=bits.join('');
+    box.onclick=(ev)=>{
+      const b=ev.target.closest('[data-cr]'); if(!b)return;
+      this.path=b.dataset.cr||'.';
+      this.selected.clear();
+      this.render();
+    };
+  },
+  syncBar(){
+    const n=this.selected.size;
+    const hasClip=!!(this.clipboard&&this.clipboard.paths&&this.clipboard.paths.length);
+    ['fv-copy','fv-cut','fv-rename','fv-delete','fv-embed'].forEach(id=>{
+      const el=$('#'+id); if(el) el.disabled=!n;
+    });
+    const paste=$('#fv-paste'); if(paste) paste.disabled=!hasClip;
+    const st=$('#fv-status');
+    if(st){
+      let t=n? (n+' selected') : (this.entries.length+' items');
+      if(hasClip) t+=' · clipboard: '+this.clipboard.mode+' '+this.clipboard.paths.length;
+      st.textContent=t;
+    }
+  },
   async render(){
     const list=$('#fv-list'); if(!list)return;
-    $('#fv-path').textContent=this.path;
+    const title=$('#fv-path');
+    if(title) title.textContent = (NI&&NI.root?NI.root+'/':'')+(this.path==='.'?'':this.path);
+    this.crumbs();
     list.innerHTML='<div class="fv-empty">Loading…</div>';
+    this.syncBar();
     try{
-      const r=JSON.parse(await nat('list_dir',{path:this.path,limit:200,sort:this.sort,hidden:false}));
+      const r=JSON.parse(await nat('list_dir',{path:this.path||'.',limit:200,sort:this.sort,hidden:false}));
       const entries=(r.data&&r.data.entries)||[];
+      this.entries=entries;
       list.innerHTML='';
       if(this.path!=='.'&&this.path!==''){
         const up=document.createElement('div'); up.className='fv-row';
-        up.innerHTML='<div class="ico dir">⬆</div><div class="name">..</div>';
-        up.onclick=()=>{const parts=this.path.split('/').filter(Boolean);parts.pop();this.path=parts.join('/')||'.';this.render()};
+        up.innerHTML='<div class="ico dir">⬆</div><div class="name">..</div><div class="meta"></div>';
+        up.onclick=()=>{const parts=this.path.split('/').filter(Boolean);parts.pop();this.path=parts.join('/')||'.';this.selected.clear();this.render()};
         list.appendChild(up);
       }
-      if(!entries.length){ list.innerHTML+='<div class="fv-empty">(empty folder)</div>'; return }
+      if(!entries.length){ list.innerHTML+='<div class="fv-empty">(empty folder)</div>'; this.syncBar(); return }
       entries.forEach(e=>{
         const gated=this.isGated(e.p);
         const row=document.createElement('div');
-        row.className='fv-row'+(gated?' gate-blocked':'');
+        const on=this.selected.has(e.p);
+        row.className='fv-row'+(gated?' gate-blocked':'')+(on?' sel':'');
+        row.dataset.path=e.p;
         const size=e.d?'':(e.s>=1048576?(e.s/1048576).toFixed(1)+' MB':e.s>=1024?Math.round(e.s/1024)+' KB':e.s+' B');
-        row.innerHTML=`<div class="ico ${e.d?'dir':''}">${e.d?'📁':'📄'}</div>
+        row.innerHTML=`<input type="checkbox" class="fv-check" ${on?'checked':''} style="margin-right:8px;flex:none">
+          <div class="ico ${e.d?'dir':''}">${e.d?'📁':'📄'}</div>
           <div class="name">${esc(e.n)}${gated?'<span class="gate-badge blocked">AI blocked</span>':''}</div>
           <div class="meta">${size||(e.m||'')}</div>`;
-        row.onclick=()=>{
-          if(e.d){ this.path=e.p; this.render(); }
+        const check=row.querySelector('.fv-check');
+        check.onclick=(ev)=>{ev.stopPropagation(); if(check.checked)this.selected.add(e.p);else this.selected.delete(e.p); row.classList.toggle('sel',check.checked); this.syncBar()};
+        row.onclick=(ev)=>{
+          if(ev.target===check)return;
+          if(e.d){ this.path=e.p; this.selected.clear(); this.render(); }
           else this.openSheet(e);
         };
+        row.oncontextmenu=(ev)=>{ev.preventDefault(); this.openSheet(e)};
         list.appendChild(row);
       });
+      this.syncBar();
     }catch(err){
-      list.innerHTML=`<div class="fv-empty" style="color:var(--danger)">${esc(err.message||String(err))}<br><span style="color:var(--fg-3)">Grant Files access in Settings if needed.</span></div>`;
+      list.innerHTML=`<div class="fv-empty" style="color:var(--danger)">${esc(err.message||String(err))}<br><span style="color:var(--fg-3)">Grant Files access in Settings → Tools → Files if needed.</span></div>`;
     }
   },
   openSheet(e){
-    this.selected=e;
+    this._sheetEntry=e;
     $('#fv-sheet-title').textContent=e.n;
     $('#fv-sheet-meta').textContent=(e.p||'')+' · '+(e.m||'')+(e.s?(' · '+e.s+' B'):'');
     const gated=this.isGated(e.p);
@@ -4060,11 +4127,18 @@ const FV = {
   }
 };
 function showFileViewer(on){ FV.show(on) }
-$('#fv-open')?.addEventListener('click',()=>{ FV.loadGatesFromCfg(); showFileViewer(true) });
+// Event delegation so sidebar rebuilds can't drop the handler
+document.addEventListener('click',(ev)=>{
+  if(ev.target.closest('#fv-open')){
+    ev.preventDefault();
+    FV.loadGatesFromCfg();
+    showFileViewer(true);
+  }
+});
 $('#fv-back')?.addEventListener('click',()=>showFileViewer(false));
 $('#fv-x')?.addEventListener('click',()=>showFileViewer(false));
-$('#fv-up')?.addEventListener('click',()=>{const parts=FV.path.split('/').filter(Boolean);parts.pop();FV.path=parts.join('/')||'.';FV.render()});
 $('#fv-refresh')?.addEventListener('click',()=>FV.render());
+$('#fv-home')?.addEventListener('click',()=>{FV.path='.';FV.selected.clear();FV.render()});
 $('#fv-sort')?.addEventListener('click',()=>{
   FV.sort=FV.sort==='name'?'size':FV.sort==='size'?'date':'name';
   $('#fv-sort').textContent='Sort: '+FV.sort;
@@ -4075,11 +4149,68 @@ $('#fv-mkdir')?.addEventListener('click',async()=>{
   const p=FV.path==='.'?name:FV.path+'/'+name;
   try{ await nat('make_dir',{path:p}); FV.render(); }catch(e){ alert(e.message||e) }
 });
-$('#fv-gates')?.addEventListener('click',()=>{
-  sheet(true); setTimeout(()=>{ showTab('mem'); const ta=$('#gate-paths'); if(ta){ ta.value=(cfg.file_gates||[]).join('\n'); ta.focus() } },50);
+$('#fv-select-all')?.addEventListener('click',()=>{
+  if(FV.selected.size===FV.entries.length){FV.selected.clear()}
+  else FV.entries.forEach(e=>FV.selected.add(e.p));
+  FV.render();
+});
+$('#fv-copy')?.addEventListener('click',()=>{
+  if(!FV.selected.size)return;
+  FV.clipboard={mode:'copy',paths:[...FV.selected]};
+  FV.syncBar();
+});
+$('#fv-cut')?.addEventListener('click',()=>{
+  if(!FV.selected.size)return;
+  FV.clipboard={mode:'cut',paths:[...FV.selected]};
+  FV.syncBar();
+});
+$('#fv-paste')?.addEventListener('click',async()=>{
+  if(!FV.clipboard||!FV.clipboard.paths.length)return;
+  const dst=FV.path==='.'?'.':FV.path;
+  try{
+    if(FV.clipboard.mode==='copy') await nat('copy',{src:FV.clipboard.paths,dst:dst+'/'});
+    else await nat('move',{src:FV.clipboard.paths,dst:dst+'/'});
+    if(FV.clipboard.mode==='cut') FV.clipboard=null;
+    FV.selected.clear();
+    FV.render();
+  }catch(e){alert(e.message||e)}
+});
+$('#fv-rename')?.addEventListener('click',async()=>{
+  if(FV.selected.size!==1){alert('Select exactly one item to rename');return}
+  const path=[...FV.selected][0];
+  const base=path.split('/').pop();
+  const name=prompt('New name', base); if(!name||name===base)return;
+  try{ await nat('rename',{path,name}); FV.selected.clear(); FV.render(); }
+  catch(e){alert(e.message||e)}
+});
+$('#fv-delete')?.addEventListener('click',async()=>{
+  if(!FV.selected.size)return;
+  if(!confirm('Delete '+FV.selected.size+' item(s)? (moved to trash unless permanent)'))return;
+  try{ await nat('delete',{paths:[...FV.selected]}); FV.selected.clear(); FV.render(); }
+  catch(e){alert(e.message||e)}
+});
+$('#fv-embed')?.addEventListener('click',async()=>{
+  if(!FV.selected.size)return;
+  const st=$('#fv-status');
+  if(st) st.textContent='Embedding '+FV.selected.size+' path(s)…';
+  try{
+    const r=JSON.parse(await nat('index_paths',{paths:[...FV.selected]}));
+    if(st) st.textContent=r.text||'Embed done';
+    alert(r.text||'Indexed selected files');
+  }catch(e){
+    if(st) st.textContent='';
+    alert(e.message||e);
+  }
 });
 $('#fv-prev-back')?.addEventListener('click',()=>$('#fv-preview').classList.remove('open'));
 $('#fv-prev-x')?.addEventListener('click',()=>$('#fv-preview').classList.remove('open'));
+
+// CSS for selected rows
+(function(){
+  const s=document.createElement('style');
+  s.textContent='#fv-list .fv-row.sel{background:rgba(56,189,248,.12)} #fv-list .fv-row{display:flex;align-items:center;padding:10px 12px;border-bottom:1px solid var(--line);cursor:pointer} #fv-list .fv-row .name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis} #fv-toolbar .fbtn:disabled{opacity:.4}';
+  document.head.appendChild(s);
+})();
 
 /* ========== User Memories (Claude-style) ========== */
 async function loadMemoriesUI(){

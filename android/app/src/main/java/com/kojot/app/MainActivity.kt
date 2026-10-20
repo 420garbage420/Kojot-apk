@@ -383,21 +383,17 @@ class MainActivity : Activity() {
         loadLocalUi(force = false)
     }
 
-    /** In-UI frosted toast instead of hiding the WebView (avoids "app minimized" feel). */
+    /** In-UI frosted toast — never hide the WebView (that felt like "app minimized"). */
     private fun notifyModelLoading(loading: Boolean, message: String = "Model loading…") {
         runOnUiThread {
-            // Keep WebView visible whenever possible — local UI, not 8080
-            if (web.visibility != View.VISIBLE && model.exists()) {
+            // Always keep chat UI on screen during model swaps / OCR
+            if (web.visibility != View.VISIBLE) {
                 loadLocalUi(force = false)
             }
+            msg.visibility = View.GONE
             val safe = JSONObject.quote(message)
             val js = "try{window.__modelLoading&&window.__modelLoading($loading,$safe)}catch(e){}"
             try { web.evaluateJavascript(js, null) } catch (_: Exception) {}
-            // Fallback native text only if web isn't up yet
-            if (web.visibility != View.VISIBLE) {
-                msg.visibility = View.VISIBLE
-                msg.text = message
-            }
         }
     }
 
@@ -740,7 +736,7 @@ class MainActivity : Activity() {
 
     private val memoryOps = setOf(
         "save_fact", "recall_memory", "recall_files", "sync_file_index",
-        "start_indexing", "get_indexing_status", "cancel_indexing",
+        "start_indexing", "index_paths", "get_indexing_status", "cancel_indexing",
         "list_facts", "clear_facts", "update_fact", "memory_stats",
         "get_user_anchor", "set_user_anchor"
     )
