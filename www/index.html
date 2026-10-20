@@ -823,6 +823,46 @@ const Cap = {
   }
 };
 
+/** Demand-driven model router — one heavy GGUF at a time; spinner via native toast. */
+const Route = {
+  async ensure(slot, msg){
+    try{
+      if(typeof window.__modelLoading==='function') window.__modelLoading(true, msg||('Switching to '+slot+'…'));
+      const raw=await nat('ensure_slot',{slot});
+      const r=typeof raw==='string'?JSON.parse(raw):raw;
+      try{ await ninfo(); }catch(_){}
+      if(typeof window.__modelLoading==='function')
+        window.__modelLoading(false, r&&r.ok ? (r.text||r.model||'Model ready') : (r&&r.error||'Switch failed'));
+      return r;
+    }catch(e){
+      if(typeof window.__modelLoading==='function') window.__modelLoading(false, e.message||'Switch failed');
+      return {ok:false, error:e.message||String(e)};
+    }
+  },
+  async forChatTurn(userText){
+    if(Cap.codingIntent(userText)&&NI&&NI.coder_model){
+      if(NI.active_slot!=='coder') await this.ensure('coder','Switching to coder…');
+    } else if(NI&&NI.active_slot==='coder'&&NI.model_present){
+      // Prefer chat for non-code turns so RAM/context stay on the general model
+      await this.ensure('chat','Switching to chat…');
+    }
+  },
+  async forEditor(open){
+    if(open){
+      if(NI&&NI.coder_model) await this.ensure('coder','Loading coder for editor…');
+    } else {
+      if(NI&&NI.model_present) await this.ensure('chat','Restoring chat model…');
+    }
+  },
+  async forOcr(){
+    // Pause chat, load vision if bound+mmproj; caller should resume after
+    return this.ensure('ocr','Loading OCR vision…');
+  },
+  async afterOcr(){
+    return this.ensure('chat_resume','Restoring model after OCR…');
+  }
+};
+
 const BLOOM=`<svg viewBox="0 0 32 32" class="kojot-logo" aria-hidden="true"><rect class="kj-ear-l" x="4" y="2" width="4" height="4" rx="1" fill="#f59e0b"/><rect x="4" y="6" width="4" height="4" rx="1" fill="#f59e0b"/><rect x="8" y="6" width="4" height="4" rx="1" fill="#d97706"/><rect class="kj-ear-r" x="24" y="2" width="4" height="4" rx="1" fill="#f59e0b"/><rect x="24" y="6" width="4" height="4" rx="1" fill="#f59e0b"/><rect x="20" y="6" width="4" height="4" rx="1" fill="#d97706"/><rect x="4" y="10" width="4" height="4" rx="1" fill="#f59e0b"/><rect x="8" y="10" width="4" height="4" rx="1" fill="#fbbf24"/><rect x="12" y="10" width="4" height="4" rx="1" fill="#f59e0b"/><rect x="16" y="10" width="4" height="4" rx="1" fill="#f59e0b"/><rect x="20" y="10" width="4" height="4" rx="1" fill="#fbbf24"/><rect x="24" y="10" width="4" height="4" rx="1" fill="#f59e0b"/><rect x="2" y="14" width="4" height="4" rx="1" fill="#f59e0b"/><rect x="6" y="14" width="4" height="4" rx="1" fill="#f6d28a"/><rect class="kj-eye" x="10" y="14" width="4" height="4" rx="1" fill="#171717"/><rect x="14" y="14" width="4" height="4" rx="1" fill="#fbbf24"/><rect class="kj-eye" x="18" y="14" width="4" height="4" rx="1" fill="#171717"/><rect x="22" y="14" width="4" height="4" rx="1" fill="#f6d28a"/><rect x="26" y="14" width="4" height="4" rx="1" fill="#f59e0b"/><rect x="6" y="18" width="4" height="4" rx="1" fill="#d97706"/><rect x="10" y="18" width="4" height="4" rx="1" fill="#f59e0b"/><rect x="14" y="18" width="4" height="4" rx="1" fill="#f6d28a"/><rect x="18" y="18" width="4" height="4" rx="1" fill="#f59e0b"/><rect x="22" y="18" width="4" height="4" rx="1" fill="#d97706"/><rect x="10" y="22" width="4" height="4" rx="1" fill="#d97706"/><rect x="14" y="22" width="4" height="4" rx="1" fill="#f6d28a"/><rect x="18" y="22" width="4" height="4" rx="1" fill="#d97706"/><rect x="14" y="26" width="4" height="3" rx="1" fill="#0f172a"/></svg>`;
 const THINK=`<span class="think">${BLOOM}Thinking<span class="dots"><span>.</span><span>.</span><span>.</span></span></span>`;
 const SUG=['Continue my last task','Organize my Downloads folder','Find my biggest files','Search the web for today\'s news','Summarize this project','Write a haiku about rain'];
@@ -1520,10 +1560,8 @@ async function run(c){setBusy(true);stopped=false;let steps=0;
   let memQuery=Task.isCont(userText)&&Task.st().goal?Task.st().goal:userText;
   _sysMem=await sysFullWithMemory(memQuery);
   if(prof.note)_sysMem+=('\n\n## Device note\n'+prof.note);
-  // Auto-coder routing: if coding intent and coder model installed, soft-swap
-  if(Cap.codingIntent(userText)&&NI&&NI.coder_model&&NI.active_slot!=='coder'){
-    try{await nat('swap_model',{slot:'coder'});ninfo();}catch(_){}
-  }
+  // Demand-driven route: coder for code intent, chat otherwise (spinner if swap needed)
+  try{ await Route.forChatTurn(userText); }catch(_){}
   for(;;){const a=c.messages.at(-1);a.error='';a.content=a.content||'';render();
    await turn(c,a);if(stopped){delete a.calls;break}if(a.error||!a.calls||!a.calls.length)break;
    await execCalls(a);if(stopped)break;
@@ -1759,7 +1797,7 @@ function paneTools(){return`<div class="pane" data-p="tool"><div class="sec">Pho
   <button data-prof="balanced">Balanced</button>
   <button data-prof="max">Max</button>
  </div></div>
- ${sw('auto_coder','Auto-route coding intent','Prefer coder model cues when the user asks about code')}
+ ${sw('auto_coder','Auto-route models','Code intent → coder; other chat → main; OCR pauses chat then restores. Spinner while switching.')}
  ${sw('tool_cache','Tool result cache','Reuse recent read-only tool results for 5 minutes')}
  <div class="r2" style="margin-top:8px">
   <button class="btn sm" id="allow-clear">Clear approval memory</button>
@@ -1799,8 +1837,9 @@ function paneTools(){return`<div class="pane" data-p="tool"><div class="sec">Pho
  <div class="tst" id="ext-m-msg"></div>
 
  <div class="sec">OCR engine</div>
- <div class="note" style="margin:0 0 8px">Default is on-device <b>ML Kit</b>. Bind a vision GGUF + matching <code>*mmproj*.gguf</code> with the <b>OCR</b> button — the runner starts <b>only when you OCR</b> (not at launch) so it does not compete with chat/coder for RAM. Opening the code editor stops the OCR server. Without mmproj, ML Kit is used.</div>
+ <div class="note" style="margin:0 0 8px">Default is on-device <b>ML Kit</b>. Put a vision GGUF in <code>Local Models/ocr/</code> and press the <b>OCR</b> button on its card (folder alone does not bind). Place a matching <code>*mmproj*.gguf</code> beside it for the vision runner on :8082. Runner starts <b>only on first OCR</b> (not at launch). Opening the code editor stops it. Without mmproj → ML Kit only.</div>
  <div class="set"><div class="lt"><span id="ocr-st">OCR path (optional)</span><small id="ocr-s">not set · using ML Kit</small></div></div>
+ <div class="r2" style="margin:4px 0 0"><button class="btn sm dng" id="ocr-del" style="display:none">Unbind OCR</button></div>
  <div class="tst" id="ocr-m"></div>
 
  <div class="sec">GitHub Integration</div>
@@ -2947,6 +2986,16 @@ $('#s-body').addEventListener('click',async e=>{const t=e.target;let b;
    try{ await nat('delete_emb',{}); ninfo(); filesUI(); alert('Embedding unbound.'); }catch(x){ alert(x.message); }
    return;
  }
+ if(t.closest('#ocr-del')){
+   if(!confirm('Unbind OCR model? The .gguf in your models folder is kept. ML Kit remains available.')) return;
+   try{
+     await nat('delete_ocr',{});
+     cfg.ocr_path=''; cfg.ocr_engine='mlkit'; saveCfg();
+     ninfo(); filesUI(); syncOcrUI();
+     alert('OCR unbound.');
+   }catch(x){ alert(x.message); }
+   return;
+ }
  if(t.closest('#coder-save')){
    const ctx = +$('#coder-ctx').value || 32768;
    const tVal = +$('#coder-t').value || 0.1;
@@ -3062,8 +3111,6 @@ function showEditor(on){
   setTimeout(syncBack, 10);
   const eng = $('#ed-engine');
   if (on) {
-    // Free OCR GGUF RAM before Monaco + optional coder load (prevents process kills)
-    try{ nat('stop_ocr',{}); }catch(_){}
     try{ ninfo(); }catch(_){}
     if (NI && NI.coder_model) {
       if (eng) { eng.textContent = 'Swapping to Coder…'; eng.style.color = 'var(--gold)'; }
@@ -3075,24 +3122,20 @@ function showEditor(on){
           eng.textContent=clean+' ('+cCtx+'k)';
           eng.style.color='var(--cyan)';
         };
-        let ok=false;
-        for(let i=0;i<3 && !ok;i++){
-          try{
-            if(i) await new Promise(r=>setTimeout(r,800*i));
-            const raw=await nat('swap_model',{slot:'coder'});
-            const r=typeof raw==='string'?JSON.parse(raw):raw;
-            if(r && r.ok){ ok=true; await ninfo(); label(); }
-          }catch(_){}
-        }
-        if(!ok && eng){ eng.textContent='Main Engine'; eng.style.color='var(--fg-3)'; }
-      })().catch(()=>{ if(eng){ eng.textContent='Main Engine'; eng.style.color='var(--fg-3)'; } });
+        try{
+          const r=await Route.forEditor(true);
+          await ninfo();
+          if(r&&r.ok) label();
+          else if(eng){ eng.textContent='Main Engine'; eng.style.color='var(--fg-3)'; }
+        }catch(_){ if(eng){ eng.textContent='Main Engine'; eng.style.color='var(--fg-3)'; } }
+      })();
     } else if (eng) {
       eng.textContent = 'Main Engine'; eng.style.color = 'var(--fg-3)';
     }
   } else {
     try{ ninfo(); }catch(_){}
-    if (NI && NI.coder_model && NI.active_slot === 'coder') {
-      nat('swap_model', { slot: 'chat' }).catch(() => {});
+    if (NI && NI.model_present && NI.active_slot === 'coder') {
+      Route.forEditor(false).catch(()=>{});
     }
   }
   try{
@@ -3559,6 +3602,8 @@ function syncOcrUI(){
     else s.textContent=path.split('/').pop()+' · bound (waiting :8082 or ML Kit fallback)';
   }
   if(st) st.textContent='OCR path (optional)';
+  const del=$('#ocr-del');
+  if(del) del.style.display=path?'inline-block':'none';
   const m=$('#ocr-m');
   if(m){
     if(!path) m.textContent='';
@@ -3629,6 +3674,11 @@ async function refreshModelsList(){
   const box=$('#models-list'); if(!box)return;
   box.innerHTML='<div style="color:var(--fg-3);padding:8px">Loading…</div>';
   try{
+    // Fill empty slots from category folders (llm/embed/coder/ocr) without overwriting binds
+    try{
+      const ab=JSON.parse(await nat('auto_bind_models',{}));
+      if(ab&&ab.bound&&ab.bound.length){ /* quiet — status updates via ninfo */ }
+    }catch(_){}
     const r=JSON.parse(await nat('list_models_dir',{}));
     const models=(r.models)||[];
     if($('#models-dir-in') && r.path) $('#models-dir-in').value=r.path;

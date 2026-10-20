@@ -642,6 +642,11 @@ class MainActivity : Activity() {
             llama?.restartServers()
             JSONObject().put("ok", true).put("text", "embedding model unbound (folder file kept)")
         }
+        "delete_ocr" -> {
+            prefs.edit().remove("ocr_path").remove("ocr_name").remove("image_path").remove("image_name").apply()
+            try { llama?.stopOcr() } catch (_: Exception) {}
+            JSONObject().put("ok", true).put("text", "OCR model unbound (folder file kept; ML Kit still available)")
+        }
         "pick_coder" -> {
             runOnUiThread { pickCoder() }
             JSONObject().put("text", "coder picker opened")
@@ -654,7 +659,8 @@ class MainActivity : Activity() {
             // Unbind only — does NOT delete the GGUF in the user's models folder
             prefs.edit().remove("model_path").remove("model_name").apply()
             File(filesDir, "model.gguf").let { if (it.exists()) it.delete() }
-            llama?.stopServers()
+            // Stop processes so UI does not keep showing a dead server; do not wipe coder/emb
+            try { llama?.stopServers() } catch (_: Exception) {}
             JSONObject().put("ok", true).put("text", "main model unbound (folder file kept; chats/memory kept)")
         }
         "set_models_dir" -> {
@@ -724,28 +730,47 @@ class MainActivity : Activity() {
                 slot = when (cat) {
                     "embed" -> "emb"
                     "coder" -> "coder"
+                    "ocr" -> "ocr"
+                    "image" -> "image"
                     else -> "chat"
                 }
             }
             when (slot) {
                 "coder" -> {
+                    // Path only — process loads on demand via ensure_slot/swap (no full restart).
                     prefs.edit().putString("coder_path", f.canonicalPath).putString("coder_name", f.name).apply()
                     File(filesDir, "coder.gguf").let { if (it.exists()) it.delete() }
-                    runOnUiThread { if (llama != null) llama?.restartServers() else bindAndStartService() }
                 }
                 "emb", "embedding" -> {
                     prefs.edit().putString("emb_path", f.canonicalPath).putString("emb_name", f.name).apply()
                     File(filesDir, "nomic.gguf").let { if (it.exists()) it.delete() }
-                    runOnUiThread { if (llama != null) llama?.restartServers() else bindAndStartService() }
+                    runOnUiThread {
+                        try { llama?.stopOcr() } catch (_: Exception) {}
+                        // Embed needs its own process on :8081
+                        if (llama != null) llama?.restartServers() else bindAndStartService()
+                    }
                 }
                 "ocr", "image" -> {
                     // Path only — OCR server starts on demand (first ocr_pdf/ocr_image) to avoid OOM
-                    prefs.edit().putString("${slot}_path", f.canonicalPath).putString("${slot}_name", f.name).apply()
+                    // Always persist under ocr_* keys when binding OCR so Settings / ensureOcr see it.
+                    val pathKey = if (slot == "ocr") "ocr_path" else "image_path"
+                    val nameKey = if (slot == "ocr") "ocr_name" else "image_name"
+                    prefs.edit().putString(pathKey, f.canonicalPath).putString(nameKey, f.name).apply()
+                    // If user dropped a vision model in OCR folder, also set ocr_path for the runner
+                    if (slot == "image") {
+                        // leave ocr_path alone unless empty
+                        if (prefs.getString("ocr_path", null).isNullOrBlank()) {
+                            prefs.edit().putString("ocr_path", f.canonicalPath).putString("ocr_name", f.name).apply()
+                        }
+                    }
                 }
                 else -> {
                     prefs.edit().putString("model_path", f.canonicalPath).putString("model_name", f.name).apply()
                     File(filesDir, "model.gguf").let { if (it.exists()) it.delete() }
-                    runOnUiThread { restartServer() }
+                    runOnUiThread {
+                        try { llama?.stopOcr() } catch (_: Exception) {}
+                        restartServer()
+                    }
                 }
             }
             if (slot == "ocr") {
@@ -761,6 +786,83 @@ class MainActivity : Activity() {
             }
         }
         "swap_model" -> swapModel(a.optString("slot", "chat"))
+        "ensure_slot" -> {
+            val role = a.optString("slot", a.optString("role", "chat"))
+            val svc = waitForService()
+            if (svc == null) {
+                JSONObject().put("ok", false).put("error", "Server not ready")
+            } else {
+                val label = when (role.lowercase()) {
+                    "coder" -> "Switching to coder…"
+                    "ocr", "vision" -> "Loading OCR vision…"
+                    "chat_resume", "resume" -> "Restoring chat model…"
+                    "embed" -> "Starting embed server…"
+                    else -> "Switching to chat…"
+                }
+                notifyModelLoading(true, label)
+                val result = try {
+                    svc.ensureSlot(role)
+                } catch (e: Exception) {
+                    JSONObject().put("ok", false).put("error", e.message ?: "ensure_slot failed")
+                }
+                notifyModelLoading(
+                    false,
+                    if (result.optBoolean("ok")) (result.optString("text", "Model ready").ifBlank { "Model ready" })
+                    else result.optString("error", "Switch failed")
+                )
+                if (result.optBoolean("ok") && role.lowercase() in setOf("chat", "coder", "chat_resume", "resume")) {
+                    runOnUiThread { showWeb() }
+                }
+                result
+            }
+        }
+        "auto_bind_models" -> {
+            // Fill empty slots from category folders (first readable GGUF). Does not overwrite existing binds.
+            val root = modelsDir()
+            val bound = mutableListOf<String>()
+            fun firstGguf(sub: String): File? {
+                val dir = File(root, sub)
+                if (!dir.isDirectory) return null
+                return dir.listFiles()
+                    ?.filter { it.isFile && it.canRead() && it.name.endsWith(".gguf", true) && !it.name.contains("mmproj", true) }
+                    ?.minByOrNull { it.length() }
+            }
+            if (prefs.getString("model_path", null).isNullOrBlank()) {
+                firstGguf("llm")?.let { f ->
+                    prefs.edit().putString("model_path", f.canonicalPath).putString("model_name", f.name).apply()
+                    bound.add("chat→${f.name}")
+                }
+            }
+            if (prefs.getString("coder_path", null).isNullOrBlank()) {
+                firstGguf("coder")?.let { f ->
+                    prefs.edit().putString("coder_path", f.canonicalPath).putString("coder_name", f.name).apply()
+                    bound.add("coder→${f.name}")
+                }
+            }
+            if (prefs.getString("emb_path", null).isNullOrBlank()) {
+                firstGguf("embed")?.let { f ->
+                    prefs.edit().putString("emb_path", f.canonicalPath).putString("emb_name", f.name).apply()
+                    bound.add("embed→${f.name}")
+                }
+            }
+            if (prefs.getString("ocr_path", null).isNullOrBlank()) {
+                (firstGguf("ocr") ?: firstGguf("image"))?.let { f ->
+                    prefs.edit().putString("ocr_path", f.canonicalPath).putString("ocr_name", f.name).apply()
+                    bound.add("ocr→${f.name}")
+                }
+            }
+            // Only restart if we newly bound chat or embed (need processes)
+            val needBoot = bound.any { it.startsWith("chat") || it.startsWith("embed") }
+            if (needBoot) {
+                runOnUiThread {
+                    try { llama?.stopOcr() } catch (_: Exception) {}
+                    if (llama != null) llama?.restartServers() else bindAndStartService()
+                }
+            }
+            JSONObject().put("ok", true)
+                .put("bound", org.json.JSONArray(bound))
+                .put("text", if (bound.isEmpty()) "No empty slots to fill" else "Auto-bound: ${bound.joinToString(", ")}")
+        }
         "set_coder_srv" -> {
             val s = a.optJSONObject("srv") ?: JSONObject()
             prefs.edit().putString("srv_coder", s.toString()).apply()
@@ -818,13 +920,26 @@ class MainActivity : Activity() {
         }
         in PdfTools.OPS -> {
             if (!filesOk()) throw ToolError("Files access isn't granted yet. Open Settings → Tools → Files and tap Grant.")
-            // Lazy-start vision OCR only when actually OCRing and a GGUF+mmproj is bound
+            // Demand-driven: pause chat/coder, start vision OCR if bound+mmproj, then run tool
             if (op == "ocr_pdf" || op == "ocr_image") {
-                try { llama?.ensureOcr(45_000L) } catch (e: Exception) {
+                try {
+                    notifyModelLoading(true, "Loading OCR vision…")
+                    llama?.ensureSlot("ocr")
+                    notifyModelLoading(false, "OCR ready")
+                } catch (e: Exception) {
                     android.util.Log.w("Kojot", "ensureOcr: ${e.message}")
+                    notifyModelLoading(false, "OCR fallback")
                 }
             }
-            PdfTools(rootDir(), applicationContext).run(op, a)
+            val pdfResult = PdfTools(rootDir(), applicationContext).run(op, a)
+            if (op == "ocr_pdf" || op == "ocr_image") {
+                try {
+                    notifyModelLoading(true, "Restoring model after OCR…")
+                    llama?.ensureSlot("chat_resume")
+                    notifyModelLoading(false, "Model ready")
+                } catch (_: Exception) {}
+            }
+            pdfResult
         }
         "stop_ocr" -> {
             try { llama?.stopOcr() } catch (_: Exception) {}

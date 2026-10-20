@@ -155,6 +155,8 @@ class LlamaService : Service() {
         if (target == activeSlot && proc?.isAlive == true) {
             return JSONObject().put("ok", true).put("slot", activeSlot).put("cached", true)
         }
+        // Never keep vision OCR up while loading chat/coder (RAM)
+        stopOcr()
         activeSlot = target
         promoteForeground(if (target == "coder") "Switching to coder model…" else "Switching to chat model…")
         proc?.destroy()
@@ -167,7 +169,7 @@ class LlamaService : Service() {
             val p = ProcessBuilder(serverArgs(exe.path, www.path)).redirectErrorStream(true).start()
             proc = p
             thread { p.inputStream.bufferedReader().forEachLine { Log.d("llama", it) } }
-            for (i in 0 until 40) {
+            for (i in 0 until 60) {
                 if (!p.isAlive) {
                     val err = "Exited with code ${p.exitValue()}"
                     notifyReady(false, err)
@@ -192,6 +194,74 @@ class LlamaService : Service() {
             val err = e.message ?: "swap failed"
             notifyReady(false, err)
             JSONObject().put("ok", false).put("error", err).put("slot", activeSlot)
+        }
+    }
+
+    /**
+     * Demand-driven router: one heavy role at a time.
+     * - chat / coder: soft-swap on :8080 (stops OCR first)
+     * - ocr: pause :8080 to free RAM, start vision :8082 if mmproj present
+     * - chat_resume: after OCR, bring previous chat/coder slot back
+     * Embed (:8081) stays up when possible (small).
+     */
+    @Volatile private var slotBeforeOcr: String? = null
+
+    fun ensureSlot(role: String): JSONObject {
+        val r = role.lowercase().trim()
+        return when (r) {
+            "chat", "coder" -> {
+                val prevOcr = ocrReady
+                stopOcr()
+                val out = swapModel(r)
+                out.put("stopped_ocr", prevOcr)
+            }
+            "ocr", "vision" -> {
+                // Pause main GGUF so vision can fit on mid-RAM phones
+                if (proc?.isAlive == true) {
+                    slotBeforeOcr = activeSlot
+                    try {
+                        proc?.destroy()
+                        try { proc?.waitFor() } catch (_: Exception) {}
+                    } catch (_: Exception) {}
+                    proc = null
+                    ready = false
+                    promoteForeground("Pausing chat for OCR…")
+                }
+                val ok = ensureOcr(60_000L)
+                JSONObject()
+                    .put("ok", ok)
+                    .put("slot", "ocr")
+                    .put("ocr_ready", ok)
+                    .put("paused_slot", slotBeforeOcr)
+                    .put("text", if (ok) "OCR vision ready" else "OCR unavailable (ML Kit fallback)")
+            }
+            "chat_resume", "resume" -> {
+                stopOcr()
+                val target = when {
+                    slotBeforeOcr == "coder" && coderModelFile().isFile -> "coder"
+                    else -> "chat"
+                }
+                slotBeforeOcr = null
+                swapModel(target).put("resumed", true)
+            }
+            "embed" -> {
+                val emb = embModelFile()
+                if (!emb.isFile) {
+                    return JSONObject().put("ok", false).put("error", "Embedding model not bound")
+                }
+                if (embReady && embProc?.isAlive == true) {
+                    return JSONObject().put("ok", true).put("slot", "embed").put("cached", true)
+                }
+                val exe = File(applicationInfo.nativeLibraryDir, "libllama_server.so")
+                startEmbedding(exe)
+                val deadline = System.currentTimeMillis() + 45_000L
+                while (System.currentTimeMillis() < deadline) {
+                    if (embReady) break
+                    try { Thread.sleep(300) } catch (_: Exception) {}
+                }
+                JSONObject().put("ok", embReady).put("slot", "embed").put("emb_ready", embReady)
+            }
+            else -> JSONObject().put("ok", false).put("error", "unknown role: $role")
         }
     }
 
