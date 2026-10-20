@@ -232,6 +232,18 @@ textarea.in{height:auto;min-height:64px;padding:9px 12px;font:13px/19px var(--mo
 #pdf-sig-pad.open{display:flex}
 #pdf-sig-box{background:var(--bg-elevated);border-radius:16px;padding:16px;width:min(360px,94vw);border:1px solid var(--line)}
 #pdf-sig-canvas{width:100%;height:140px;background:#fff;border-radius:8px;touch-action:none;border:1px solid var(--line)}
+/* Model loading frosted toast */
+#model-load-overlay{position:fixed;inset:0;z-index:90;display:none;align-items:center;justify-content:center;background:rgba(8,8,10,.35);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);pointer-events:none;opacity:0;transition:opacity .22s ease}
+#model-load-overlay.on{display:flex;opacity:1;pointer-events:auto}
+#model-load-toast{min-width:min(280px,86vw);max-width:340px;padding:18px 20px;border-radius:18px;background:rgba(32,32,36,.72);border:1px solid rgba(255,255,255,.1);box-shadow:0 12px 40px rgba(0,0,0,.45);backdrop-filter:blur(18px);-webkit-backdrop-filter:blur(18px);text-align:center;color:var(--fg)}
+#model-load-toast .spin{width:28px;height:28px;margin:0 auto 12px;border-radius:50%;border:2.5px solid rgba(255,255,255,.15);border-top-color:var(--accent);animation:mlspin .8s linear infinite}
+#model-load-toast .ttl{font-size:15px;font-weight:600;letter-spacing:.01em}
+#model-load-toast .sub{font-size:12px;color:var(--fg-3);margin-top:6px;line-height:1.35}
+#model-load-toast.done .spin{display:none}
+#model-load-toast.err{border-color:rgba(255,100,90,.35)}
+@keyframes mlspin{to{transform:rotate(360deg)}}
+#pdf-pages canvas.place-target{outline:2px dashed var(--cyan);cursor:crosshair}
+
 /* ===== Code Editor view (Monaco Mobile) ===== */
 :root{--cyan:#5eead4;--gold:#e5b567;--ember:#f43f5e;--violet:#a78bfa}
 #editor-view{display:none;flex-direction:column;position:absolute;inset:0;background:var(--bg);z-index:5}
@@ -408,6 +420,7 @@ textarea.in{height:auto;min-height:64px;padding:9px 12px;font:13px/19px var(--mo
     <button class="pbtn ai" id="pdf-btn-ai" disabled><svg viewBox="0 0 24 24"><path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8L12 3z"/></svg>AI Fill</button>
     <button class="pbtn" id="pdf-btn-fields" disabled><svg viewBox="0 0 24 24"><path d="M9 5h11M9 12h11M9 19h11M5 5v.01M5 12v.01M5 19v.01"/></svg>Fields</button>
     <button class="pbtn" id="pdf-btn-sig" disabled><svg viewBox="0 0 24 24"><path d="M3 17c3-1 5 2 8 0s5-1 8 1"/><path d="M4 21h16"/></svg>Sign</button>
+    <button class="pbtn" id="pdf-btn-text" disabled><svg viewBox="0 0 24 24"><path d="M4 7V5h16v2M9 19h6M12 5v14"/></svg>Text</button>
     <button class="pbtn primary" id="pdf-btn-save" disabled><svg viewBox="0 0 24 24"><path d="M5 3h11l4 4v13a1 1 0 01-1 1H5a1 1 0 01-1-1V4a1 1 0 011-1z"/><path d="M8 3v6h8V3"/></svg>Save</button>
    </div>
   </div>
@@ -428,6 +441,14 @@ textarea.in{height:auto;min-height:64px;padding:9px 12px;font:13px/19px var(--mo
    <button class="btn sm" id="pdf-sig-cancel">Cancel</button>
    <button class="btn sm go" id="pdf-sig-ok" style="flex:1">Stamp</button>
   </div>
+ </div>
+</div>
+
+<div id="model-load-overlay" aria-live="polite">
+ <div id="model-load-toast">
+  <div class="spin"></div>
+  <div class="ttl" id="model-load-ttl">Model loading…</div>
+  <div class="sub" id="model-load-sub">Keeping the UI open while the engine swaps</div>
  </div>
 </div>
 
@@ -1830,7 +1851,7 @@ const PDF = {
     const pages = $('#pdf-pages');
     if(empty) empty.style.display = on ? 'none' : 'flex';
     if(pages) pages.style.display = on ? 'flex' : 'none';
-    ['pdf-btn-ocr','pdf-btn-ai','pdf-btn-fields','pdf-btn-sig','pdf-btn-save'].forEach(id=>{
+    ['pdf-btn-ocr','pdf-btn-ai','pdf-btn-fields','pdf-btn-sig','pdf-btn-text','pdf-btn-save'].forEach(id=>{
       const b=$('#'+id); if(b) b.disabled = !on;
     });
   },
@@ -2025,6 +2046,31 @@ const PDF = {
       more.textContent='Showing first 25 of '+n+' pages';
       wrap.appendChild(more);
     }
+    this.bindPageClicks();
+  },
+
+  bindPageClicks(){
+    const wrap = $('#pdf-pages');
+    if(!wrap) return;
+    wrap.querySelectorAll('canvas').forEach(canvas=>{
+      canvas.onclick = async (ev)=>{
+        if(!this.placeMode) return;
+        const pos = this.canvasToPdf(canvas, ev.clientX, ev.clientY);
+        if(!pos) return;
+        try{
+          if(this.placeMode.kind==='text'){
+            const size = parseInt($('#pdf-text-size')?.value||'14',10)||14;
+            await this.stampText(this.placeMode.text, pos.pageIndex, pos.x, pos.y - size, size);
+            this.toast('Text placed — Save to write file');
+          } else if(this.placeMode.kind==='sign' && this.placeMode.dataUrl){
+            await this.stampSignature(this.placeMode.dataUrl, pos.pageIndex, pos.x, pos.y);
+            this.toast('Signature placed — Save to write file');
+          }
+          this.clearPlaceMode();
+          this.closeSheet();
+        }catch(e){ this.toast(String(e.message||e), true); }
+      };
+    });
   },
 
   async refreshFields(){
@@ -2128,20 +2174,73 @@ const PDF = {
     return path;
   },
 
-  async stampSignature(dataUrl){
+  async stampSignature(dataUrl, pageIndex, pdfX, pdfY){
     if(!this.libDoc) throw Error('No PDF loaded');
     const png = await fetch(dataUrl).then(r=>r.arrayBuffer());
     const img = await this.libDoc.embedPng(png);
     const pages = this.libDoc.getPages();
-    const page = pages[0];
+    const page = pages[Math.max(0, Math.min(pages.length-1, (pageIndex|0)))];
     const w=140, h=48;
-    page.drawImage(img,{x:54,y:54,width:w,height:h});
+    const size = page.getSize();
+    const x = pdfX!=null ? pdfX : 54;
+    const y = pdfY!=null ? pdfY : 54;
+    page.drawImage(img,{x, y, width:w, height:h});
     this.dirty=true;
+    // refresh viewer preview from libDoc bytes would need save — mark dirty for user
   },
+
+  /** Draw free text on any PDF (AcroForm not required). PDF coords: origin bottom-left. */
+  async stampText(str, pageIndex, pdfX, pdfY, size){
+    if(!this.libDoc) throw Error('No PDF loaded');
+    str = String(str||'').trim();
+    if(!str) throw Error('Enter some text');
+    const pages = this.libDoc.getPages();
+    const page = pages[Math.max(0, Math.min(pages.length-1, (pageIndex|0)))];
+    const font = await this.libDoc.embedFont(PDFLib.StandardFonts.Helvetica);
+    const fontSize = size || 12;
+    const x = pdfX!=null ? pdfX : 72;
+    const y = pdfY!=null ? pdfY : 72;
+    page.drawText(str, { x, y, size: fontSize, font, color: PDFLib.rgb(0.1,0.1,0.1) });
+    this.dirty = true;
+  },
+
+  placeMode: null, // {kind:'text'|'sign', text?:string}
+  clearPlaceMode(){
+    this.placeMode = null;
+    document.querySelectorAll('#pdf-pages canvas').forEach(c=>c.classList.remove('place-target'));
+  },
+  enterPlaceMode(kind, text){
+    this.placeMode = {kind, text: text||''};
+    document.querySelectorAll('#pdf-pages canvas').forEach(c=>c.classList.add('place-target'));
+    this.toast(kind==='text' ? 'Tap the page to place text' : 'Tap the page to place signature');
+  },
+  canvasToPdf(canvas, clientX, clientY){
+    const rect = canvas.getBoundingClientRect();
+    const pageIndex = Math.max(0, (parseInt(canvas.dataset.page,10)||1) - 1);
+    if(!this.libDoc) return null;
+    const page = this.libDoc.getPages()[pageIndex];
+    if(!page) return null;
+    const {width: pw, height: ph} = page.getSize();
+    const rx = (clientX - rect.left) / rect.width;
+    const ry = (clientY - rect.top) / rect.height;
+    // canvas y grows down; PDF y grows up
+    return { pageIndex, x: rx * pw, y: (1 - ry) * ph };
+  },
+
+  showTextSheet(){
+    const html = `<p style="font-size:12px;color:var(--fg-3);margin:0 0 10px;line-height:1.4">Works on <b>any</b> PDF — fillable or flat/scanned. Type text, then tap where it should go on the page. OCR can <i>read</i> scans; Text/Sign <i>draw</i> onto them.</p>
+<textarea id="pdf-text-in" placeholder="Text to stamp" style="width:100%;min-height:72px;background:var(--bg);border:1px solid var(--line);color:var(--fg);font-size:14px;padding:10px 12px;border-radius:10px"></textarea>
+<label style="display:flex;align-items:center;gap:8px;margin-top:10px;font-size:12px;color:var(--fg-2)">Size
+ <input id="pdf-text-size" type="number" value="14" min="8" max="48" style="width:64px;background:var(--bg);border:1px solid var(--line);color:var(--fg);padding:6px 8px;border-radius:8px"></label>
+<button type="button" id="pdf-text-place" style="width:100%;margin-top:12px;padding:12px;border-radius:12px;border:0;background:var(--accent);color:var(--on-accent);font-weight:600">Tap page to place</button>
+<button type="button" id="pdf-text-default" style="width:100%;margin-top:8px;padding:10px;border-radius:12px;border:1px solid var(--line);background:var(--bg-subtle);color:var(--fg);font-weight:500">Place at bottom-left</button>`;
+    this.openSheet('Add text', html);
+  },
+
 
   showAiSheet(){
     const nFields = (this.fields||[]).length;
-    const html = `<p style="font-size:12px;color:var(--fg-3);margin:0 0 10px;line-height:1.4">Describe how to fill this form. Uses your <b>local</b> chat model and the field list only.</p>
+    const html = `<p style="font-size:12px;color:var(--fg-3);margin:0 0 10px;line-height:1.4">Uses your <b>local</b> model. Fillable PDFs use form fields; flat/scanned PDFs use OCR positions then stamp text.</p>
 <textarea id="pdf-ai-in" placeholder="e.g. Name Jane Doe, date today, check Agree to terms" style="width:100%;min-height:88px;background:var(--bg);border:1px solid var(--line);color:var(--fg);font-size:14px;padding:10px 12px;border-radius:10px;resize:vertical"></textarea>
 <button type="button" id="pdf-ai-run" style="width:100%;margin-top:10px;padding:12px;border-radius:12px;border:0;background:var(--accent);color:var(--on-accent);font-weight:600;font-size:14px;cursor:pointer">Fill with local model${nFields?'' : ' (no fields yet)'}</button>
 <div id="pdf-ai-status" style="font-size:11px;color:var(--fg-3);margin-top:8px;font-family:var(--mono)">${nFields? nFields+' fields detected':'No AcroForm fields — open a fillable PDF first'}</div>`;
@@ -2156,7 +2255,7 @@ const PDF = {
     if(st) st.textContent='Calling local model…';
     try{
       const n = await this.aiFill(instr);
-      if(st) st.textContent='Updated '+n+' field(s). Open Fields to review, then Save.';
+      if(st) st.textContent='Updated '+n+' item(s). Review, then Save.';
       this.toast('Updated '+n+' field(s)');
       if(btn){ btn.disabled=false; btn.textContent='Fill with local model'; btn.style.opacity='1'; }
     }catch(e){
@@ -2167,63 +2266,86 @@ const PDF = {
     }
   },
 
-  async aiFill(instruction){
-    if(!this.fields.length) await this.refreshFields();
-    if(!this.fields.length) throw Error('No fillable fields — open a form PDF with AcroForm fields');
-    const catalog = this.fields.map(f=>({name:f.name, type:f.type.replace(/^PDF/,''), value:f.value, checked:f.checked})).slice(0,60);
-    const schema = {
-      type:'object', additionalProperties:false,
-      properties:{ fields:{ type:'array', items:{ type:'object', additionalProperties:false,
-        properties:{ name:{type:'string'}, value:{type:'string'}, checked:{type:'boolean'} },
-        required:['name'] } } },
-      required:['fields']
-    };
-    const sys = 'You fill PDF form fields. Output ONLY JSON {"fields":[{"name":"...","value":"..."} or {"name":"...","checked":true}]}. Use exact field names from the catalog. Do not invent names. Only fill what the user asked.';
-    const user = 'INSTRUCTION: '+instruction+'\n\nFIELD CATALOG:\n'+JSON.stringify(catalog);
-    const body = {
-      model:'local', temperature:0.1, max_tokens:900,
-      messages:[{role:'system',content:sys},{role:'user',content:user}],
-      response_format:{type:'json_schema', json_schema:{name:'pdf_fill', strict:true, schema}}
-    };
+
+  async chatJson(sys, user, maxTokens){
     const base=(cfg.url||'http://127.0.0.1:8080').replace(/\/$/,'');
+    const body = {
+      model:'local', temperature:0.15, max_tokens: maxTokens||1200,
+      messages:[{role:'system',content:sys},{role:'user',content:user}]
+    };
     const ctrl = new AbortController();
-    const timer = setTimeout(()=>ctrl.abort(), 90000);
+    const timer = setTimeout(()=>ctrl.abort(), 120000);
     let res;
     try{
       res = await fetch(base+'/v1/chat/completions',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body),signal:ctrl.signal});
     }finally{ clearTimeout(timer); }
-    if(!res.ok){
-      // Fallback without json_schema for servers that reject it
-      const body2 = {model:'local',temperature:0.1,max_tokens:900,messages:body.messages};
-      const res2 = await fetch(base+'/v1/chat/completions',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body2)});
-      if(!res2.ok) throw Error('Model error HTTP '+res.status);
-      res = res2;
-    }
+    if(!res.ok) throw Error('Model error HTTP '+res.status);
     const data = await res.json();
     let raw = data.choices?.[0]?.message?.content || '{}';
     raw = raw.replace(/^```(?:json)?\s*/i,'').replace(/\s*```$/i,'').trim();
-    // salvage first JSON object
     const m = raw.match(/\{[\s\S]*\}/);
     if(m) raw = m[0];
-    let parsed;
-    try{ parsed = JSON.parse(raw); }
+    try{ return JSON.parse(raw); }
     catch(_){
-      // trailing comma / repair light
       raw = raw.replace(/,\s*([}\]])/g,'$1');
-      parsed = JSON.parse(raw);
+      return JSON.parse(raw);
     }
-    const updates = parsed.fields || [];
+  },
+
+  async aiFill(instruction){
+    if(!this.fields.length) await this.refreshFields();
+    // Path A: real AcroForm fields
+    if(this.fields.length){
+      const catalog = this.fields.map(f=>({name:f.name, type:f.type.replace(/^PDF/,''), value:f.value, checked:f.checked})).slice(0,60);
+      const sys = 'You fill PDF form fields. Output ONLY JSON {"fields":[{"name":"...","value":"..."} or {"name":"...","checked":true}]}. Use exact field names from the catalog. Do not invent names. Only fill what the user asked.';
+      const user = 'INSTRUCTION: '+instruction+'\n\nFIELD CATALOG:\n'+JSON.stringify(catalog);
+      const parsed = await this.chatJson(sys, user, 900);
+      const updates = parsed.fields || [];
+      let n=0;
+      for(const u of updates){
+        const f = this.fields.find(x=>x.name===u.name);
+        if(!f) continue;
+        if(typeof u.checked==='boolean'){ f.checked=u.checked; f.value=u.checked?'Yes':'Off'; }
+        else if(u.value!=null) f.value=String(u.value);
+        n++;
+      }
+      this.dirty=true;
+      return n;
+    }
+    // Path B: flat / scanned PDF — OCR layout → model → stamp text at PDF coordinates
+    if(!this.path) throw Error('No PDF open');
+    this.toast('OCR layout…');
+    const ocr = J.parse(await nat('ocr_pdf',{path:this.path, max_pages:6}));
+    const data = ocr.data || {};
+    const anchors = (data.anchors || []).slice(0, 40);
+    const lines = (data.lines || []).slice(0, 80).map(l=>({
+      page:l.page, text:l.text,
+      x:l.box&&l.box.x, y:l.box&&l.box.y, w:l.box&&l.box.w, h:l.box&&l.box.h
+    }));
+    if(!anchors.length && !lines.length) throw Error('OCR found no text — cannot place fills');
+    const sys = `You fill a non-interactive PDF by placing text at coordinates.
+Coordinates are PDF user space: origin bottom-left, units points, y increases upward.
+Prefer "anchors" (suggested blanks to the right of labels). Only use line boxes if needed.
+Output ONLY JSON:
+{"stamps":[{"page":1,"x":120.5,"y":400.2,"text":"Jane Doe","size":12}, ...]}
+page is 1-based. Do not invent values the user did not provide. Skip unknown fields.`;
+    const user = 'INSTRUCTION:\n'+instruction+'\n\nANCHORS (preferred fill positions):\n'+JSON.stringify(anchors)+'\n\nOCR LINES (context):\n'+JSON.stringify(lines);
+    const parsed = await this.chatJson(sys, user, 1200);
+    const stamps = parsed.stamps || parsed.placements || [];
     let n=0;
-    for(const u of updates){
-      const f = this.fields.find(x=>x.name===u.name);
-      if(!f) continue;
-      if(typeof u.checked==='boolean'){ f.checked=u.checked; f.value=u.checked?'Yes':'Off'; }
-      else if(u.value!=null) f.value=String(u.value);
+    for(const s of stamps){
+      if(!s || s.text==null || s.text==='') continue;
+      const pageIndex = Math.max(0, (parseInt(s.page,10)||1) - 1);
+      const x = Number(s.x), y = Number(s.y);
+      if(!Number.isFinite(x) || !Number.isFinite(y)) continue;
+      const size = Number(s.size)||12;
+      await this.stampText(String(s.text), pageIndex, x, y, size);
       n++;
     }
+    if(!n) throw Error('Model returned no placeable stamps — try clearer instructions');
     this.dirty=true;
     return n;
-  }
+  },
 };
 
 async function pdfTool(name, a){
@@ -2374,7 +2496,7 @@ $('#pdf-btn-ocr')?.addEventListener('click',async()=>{
   try{
     PDF.toast('OCR running on device…');
     const r=J.parse(await nat('ocr_pdf',{path:PDF.path,max_pages:6}));
-    const body = '<pre style="white-space:pre-wrap;font-size:12px;line-height:1.4;margin:0">'
+    const body = '<p style="font-size:12px;color:var(--fg-3);margin:0 0 10px;line-height:1.4">OCR reads <b>any</b> PDF (scans, photos, flat files). It does not need AcroForm fields. Use <b>Text</b> / <b>Sign</b> to write onto non-fillable pages, then Save.</p><pre style="white-space:pre-wrap;font-size:12px;line-height:1.4;margin:0">'
       +esc((r.text||'').slice(0,4000))+'</pre>';
     PDF.openSheet('OCR result', body);
   }catch(e){ PDF.toast(String(e.message||e), true); }
@@ -2424,13 +2546,70 @@ document.addEventListener('click', (e)=>{
   $('#pdf-sig-ok')?.addEventListener('click',async()=>{
     try{
       const url=canvas.toDataURL('image/png');
-      await PDF.stampSignature(url);
       $('#pdf-sig-pad').classList.remove('open');
-      PDF.toast('Signature stamped — Save to write file');
+      // Place by tap so it works on non-AcroForm anywhere on the page
+      PDF.placeMode = {kind:'sign', dataUrl:url};
+      document.querySelectorAll('#pdf-pages canvas').forEach(c=>c.classList.add('place-target'));
+      PDF.toast('Tap the page to place your signature');
     }catch(e){ PDF.toast(String(e.message||e), true); }
   });
 })();
 
+$('#pdf-btn-text')?.addEventListener('click',()=>{
+  if(!PDF.path){ PDF.toast('Open a PDF first', true); return; }
+  PDF.showTextSheet();
+});
+
+document.addEventListener('click', (e)=>{
+  const t=e.target;
+  if(!t) return;
+  if(t.id==='pdf-text-place' || t.closest?.('#pdf-text-place')){
+    const str = ($('#pdf-text-in')?.value||'').trim();
+    if(!str){ PDF.toast('Enter text first', true); return; }
+    PDF.enterPlaceMode('text', str);
+    PDF.closeSheet();
+  }
+  if(t.id==='pdf-text-default' || t.closest?.('#pdf-text-default')){
+    (async()=>{
+      try{
+        const str = ($('#pdf-text-in')?.value||'').trim();
+        const size = parseInt($('#pdf-text-size')?.value||'14',10)||14;
+        await PDF.stampText(str, 0, 72, 72, size);
+        PDF.closeSheet();
+        PDF.toast('Text placed bottom-left — Save to write file');
+      }catch(err){ PDF.toast(String(err.message||err), true); }
+    })();
+  }
+});
+
+
+
+
+/* Frosted model-loading toast (native calls window.__modelLoading) */
+window.__modelLoading = function(on, message){
+  const ov = document.getElementById('model-load-toast') && document.getElementById('model-load-overlay');
+  if(!ov) return;
+  const overlay = document.getElementById('model-load-overlay');
+  const toast = document.getElementById('model-load-toast');
+  const ttl = document.getElementById('model-load-ttl');
+  const sub = document.getElementById('model-load-sub');
+  const msg = (message==null||message==='') ? 'Model loading…' : String(message);
+  if(on){
+    toast.classList.remove('done','err');
+    if(ttl) ttl.textContent = msg;
+    if(sub) sub.textContent = 'UI stays open — engine is warming up';
+    overlay.classList.add('on');
+    clearTimeout(window.__mlHide);
+  } else {
+    const isErr = /fail|error|timeout|not ready/i.test(msg);
+    toast.classList.add('done');
+    if(isErr) toast.classList.add('err');
+    if(ttl) ttl.textContent = isErr ? msg : (msg || 'Model ready');
+    if(sub) sub.textContent = isErr ? 'You can keep using the app' : 'Ready';
+    clearTimeout(window.__mlHide);
+    window.__mlHide = setTimeout(()=>overlay.classList.remove('on'), isErr ? 2800 : 900);
+  }
+};
 
 try{Cap.offerResume()}catch(_){}
 $('#s-body').addEventListener('input',e=>{const el=e.target.closest('[data-k]');if(!el)return;const t=el.dataset.t,key=el.dataset.k;let v=el.value;

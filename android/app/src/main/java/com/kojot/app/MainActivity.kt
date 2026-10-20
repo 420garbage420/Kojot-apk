@@ -101,14 +101,21 @@ class MainActivity : Activity() {
 
     private val readyCb: (Boolean, String?) -> Unit = { ok, err ->
         runOnUiThread {
-            if (ok) showWeb()
-            else {
-                web.visibility = View.GONE
-                msg.visibility = View.VISIBLE
-                msg.text = err ?: "Model server failed"
-                if (hasCustomArgs()) {
-                    msg.text = (msg.text.toString()) + "\n\nTap to reset server settings and retry."
-                    tap = { prefs.edit().remove("srv").remove("srv_coder").apply(); restartServer() }
+            if (ok) {
+                showWeb()
+                notifyModelLoading(false, "Model ready")
+            } else {
+                // Prefer in-UI error toast; only fall back to full-screen if web never loaded
+                if (web.visibility == View.VISIBLE && !web.url.isNullOrBlank()) {
+                    notifyModelLoading(false, err ?: "Model server failed")
+                } else {
+                    web.visibility = View.GONE
+                    msg.visibility = View.VISIBLE
+                    msg.text = err ?: "Model server failed"
+                    if (hasCustomArgs()) {
+                        msg.text = (msg.text.toString()) + "\n\nTap to reset server settings and retry."
+                        tap = { prefs.edit().remove("srv").remove("srv_coder").apply(); restartServer() }
+                    }
                 }
             }
         }
@@ -187,7 +194,30 @@ class MainActivity : Activity() {
     private fun showWeb() {
         msg.visibility = View.GONE
         web.visibility = View.VISIBLE
-        web.loadUrl("http://127.0.0.1:8080/")
+        // Only (re)load if we haven't loaded yet or were on the splash
+        if (web.url.isNullOrBlank() || web.url == "about:blank") {
+            web.loadUrl("http://127.0.0.1:8080/")
+        }
+    }
+
+    /** In-UI frosted toast instead of hiding the WebView (avoids "app minimized" feel). */
+    private fun notifyModelLoading(loading: Boolean, message: String = "Model loading…") {
+        runOnUiThread {
+            // Keep WebView visible whenever possible
+            if (web.visibility != View.VISIBLE && model.exists()) {
+                msg.visibility = View.GONE
+                web.visibility = View.VISIBLE
+                if (web.url.isNullOrBlank()) web.loadUrl("http://127.0.0.1:8080/")
+            }
+            val safe = JSONObject.quote(message)
+            val js = "try{window.__modelLoading&&window.__modelLoading($loading,$safe)}catch(e){}"
+            try { web.evaluateJavascript(js, null) } catch (_: Exception) {}
+            // Fallback native text only if web isn't up yet
+            if (web.visibility != View.VISIBLE) {
+                msg.visibility = View.VISIBLE
+                msg.text = message
+            }
+        }
     }
 
     private fun prepareWww() {
@@ -362,9 +392,7 @@ class MainActivity : Activity() {
     }
 
     private fun restartServer() {
-        web.visibility = View.GONE
-        msg.visibility = View.VISIBLE
-        msg.text = "Restarting model…"
+        notifyModelLoading(true, "Restarting model…")
         prepareWww()
         if (llama != null) llama?.restartServers()
         else {
@@ -390,26 +418,18 @@ class MainActivity : Activity() {
         if (svc == null) {
             return JSONObject().put("ok", false).put("error", "Server not ready — open the app fully, then try again").put("slot", activeSlot)
         }
-        runOnUiThread {
-            web.visibility = View.GONE
-            msg.visibility = View.VISIBLE
-            msg.text = "Switching model…"
-        }
+        notifyModelLoading(true, if (slot == "coder") "Loading coder model…" else "Loading chat model…")
         val result = svc.swapModel(slot)
+        notifyModelLoading(false, if (result.optBoolean("ok")) "Model ready" else (result.optString("error", "Swap failed")))
         if (result.optBoolean("ok")) {
             runOnUiThread { showWeb() }
-        } else {
-            // Don't leave user stuck on error screen — restore web so they can back out
-            runOnUiThread {
-                showWeb()
-            }
         }
         return result
     }
 
     private fun start() {
         tap = null
-        msg.text = "Loading model…"
+        notifyModelLoading(true, "Loading model…")
         prepareWww()
         bindAndStartService()
     }
