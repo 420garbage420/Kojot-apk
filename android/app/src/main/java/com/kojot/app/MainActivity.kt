@@ -222,12 +222,94 @@ class MainActivity : Activity() {
             prefs.edit().putBoolean("battery_asked", true).apply()
             requestBatteryExemption()
         }
+        // Always bring up the UI first. Never force the system file picker on cold start —
+        // SAF on Samsung often cannot resolve a real path, and the in-app Models list works.
+        prepareWww()
+        showWeb()
+        // Auto-bind empty slots from Download/Local Models (root + category subfolders)
+        try { autoBindModelsFromDisk() } catch (e: Exception) {
+            Log.w("Kojot", "autoBind on start: ${e.message}")
+        }
         if (model.exists()) {
-            prepareWww()
-            // Show local UI immediately — do not wait for llama-server (avoids ERR_CONNECTION_REFUSED)
-            showWeb()
             bindAndStartService()
-        } else pickModel()
+        } else {
+            msg.visibility = View.GONE
+            // UI is up; user binds from Settings → Models list (real paths)
+            Log.i("Kojot", "No chat model bound yet — open Settings → Models folder")
+        }
+    }
+
+    /**
+     * Fill empty / broken model slots from the models folder without overwriting good binds.
+     * Searches category subfolders and the folder root (any .gguf not named mmproj).
+     * @return list of "slot→filename" strings that were newly bound
+     */
+    private fun autoBindModelsFromDisk(): List<String> {
+        val root = modelsDir()
+        val bound = mutableListOf<String>()
+        // Drop prefs that point at missing/unreadable files so we can re-bind
+        fun clearIfDead(pathKey: String, nameKey: String) {
+            val p = prefs.getString(pathKey, null) ?: return
+            if (p.isBlank()) return
+            val f = File(p)
+            if (!f.isFile || !f.canRead()) {
+                prefs.edit().remove(pathKey).remove(nameKey).apply()
+                Log.w("Kojot", "cleared dead $pathKey=$p")
+            }
+        }
+        clearIfDead("model_path", "model_name")
+        clearIfDead("coder_path", "coder_name")
+        clearIfDead("emb_path", "emb_name")
+        clearIfDead("ocr_path", "ocr_name")
+
+        fun listGgufs(dir: File): List<File> {
+            if (!dir.isDirectory) return emptyList()
+            return dir.listFiles()
+                ?.filter {
+                    it.isFile && it.canRead() &&
+                        it.name.endsWith(".gguf", true) &&
+                        !it.name.contains("mmproj", true)
+                }
+                ?.sortedBy { it.length() }
+                ?: emptyList()
+        }
+        fun firstIn(vararg subs: String): File? {
+            for (sub in subs) {
+                val hit = listGgufs(File(root, sub)).firstOrNull()
+                if (hit != null) return hit
+            }
+            return null
+        }
+        // Chat: llm/ then decision/ then any loose .gguf in models root
+        if (prefs.getString("model_path", null).isNullOrBlank()) {
+            val f = firstIn("llm", "decision") ?: listGgufs(root).firstOrNull()
+            if (f != null) {
+                prefs.edit().putString("model_path", f.canonicalPath).putString("model_name", f.name).apply()
+                File(filesDir, "model.gguf").let { if (it.exists()) it.delete() }
+                bound.add("chat→${f.name}")
+            }
+        }
+        if (prefs.getString("coder_path", null).isNullOrBlank()) {
+            firstIn("coder")?.let { f ->
+                prefs.edit().putString("coder_path", f.canonicalPath).putString("coder_name", f.name).apply()
+                bound.add("coder→${f.name}")
+            }
+        }
+        if (prefs.getString("emb_path", null).isNullOrBlank()) {
+            firstIn("embed")?.let { f ->
+                prefs.edit().putString("emb_path", f.canonicalPath).putString("emb_name", f.name).apply()
+                bound.add("embed→${f.name}")
+            }
+        }
+        if (prefs.getString("ocr_path", null).isNullOrBlank()) {
+            firstIn("ocr", "image")?.let { f ->
+                prefs.edit().putString("ocr_path", f.canonicalPath).putString("ocr_name", f.name).apply()
+                bound.add("ocr→${f.name}")
+            }
+        }
+        if (bound.isNotEmpty()) Log.i("Kojot", "auto-bound: ${bound.joinToString()}")
+        else Log.i("Kojot", "auto-bind: nothing found under ${root.path} (files access? empty folder?)")
+        return bound
     }
 
     private fun bindAndStartService() {
@@ -868,41 +950,7 @@ class MainActivity : Activity() {
             }
         }
         "auto_bind_models" -> {
-            // Fill empty slots from category folders (first readable GGUF). Does not overwrite existing binds.
-            val root = modelsDir()
-            val bound = mutableListOf<String>()
-            fun firstGguf(sub: String): File? {
-                val dir = File(root, sub)
-                if (!dir.isDirectory) return null
-                return dir.listFiles()
-                    ?.filter { it.isFile && it.canRead() && it.name.endsWith(".gguf", true) && !it.name.contains("mmproj", true) }
-                    ?.minByOrNull { it.length() }
-            }
-            if (prefs.getString("model_path", null).isNullOrBlank()) {
-                firstGguf("llm")?.let { f ->
-                    prefs.edit().putString("model_path", f.canonicalPath).putString("model_name", f.name).apply()
-                    bound.add("chat→${f.name}")
-                }
-            }
-            if (prefs.getString("coder_path", null).isNullOrBlank()) {
-                firstGguf("coder")?.let { f ->
-                    prefs.edit().putString("coder_path", f.canonicalPath).putString("coder_name", f.name).apply()
-                    bound.add("coder→${f.name}")
-                }
-            }
-            if (prefs.getString("emb_path", null).isNullOrBlank()) {
-                firstGguf("embed")?.let { f ->
-                    prefs.edit().putString("emb_path", f.canonicalPath).putString("emb_name", f.name).apply()
-                    bound.add("embed→${f.name}")
-                }
-            }
-            if (prefs.getString("ocr_path", null).isNullOrBlank()) {
-                (firstGguf("ocr") ?: firstGguf("image"))?.let { f ->
-                    prefs.edit().putString("ocr_path", f.canonicalPath).putString("ocr_name", f.name).apply()
-                    bound.add("ocr→${f.name}")
-                }
-            }
-            // Only restart if we newly bound chat or embed (need processes)
+            val bound = autoBindModelsFromDisk()
             val needBoot = bound.any { it.startsWith("chat") || it.startsWith("embed") }
             if (needBoot) {
                 runOnUiThread {
@@ -911,7 +959,7 @@ class MainActivity : Activity() {
                 }
             }
             JSONObject().put("ok", true)
-                .put("bound", org.json.JSONArray(bound))
+                .put("bound", org.json.JSONArray(bound as Collection<*>))
                 .put("text", if (bound.isEmpty()) "No empty slots to fill" else "Auto-bound: ${bound.joinToString(", ")}")
         }
         "set_coder_srv" -> {
