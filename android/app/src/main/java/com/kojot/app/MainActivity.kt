@@ -127,20 +127,19 @@ class MainActivity : Activity() {
 
     private val readyCb: (Boolean, String?) -> Unit = { ok, err ->
         runOnUiThread {
+            // Always prefer local file:// UI — never depend on :8080 for chrome
+            loadLocalUi(force = false)
             if (ok) {
-                showWeb()
                 notifyModelLoading(false, "Model ready")
             } else {
-                // Prefer in-UI error toast; only fall back to full-screen if web never loaded
-                if (web.visibility == View.VISIBLE && !web.url.isNullOrBlank()) {
-                    notifyModelLoading(false, err ?: "Model server failed")
-                } else {
-                    web.visibility = View.GONE
+                val msgText = err ?: "Model server failed"
+                notifyModelLoading(false, msgText)
+                if (web.visibility != View.VISIBLE) {
                     msg.visibility = View.VISIBLE
-                    msg.text = err ?: "Model server failed"
-                    if (hasCustomArgs()) {
-                        msg.text = (msg.text.toString()) + "\n\nTap to reset server settings and retry."
-                        tap = { prefs.edit().remove("srv").remove("srv_coder").apply(); restartServer() }
+                    msg.text = msgText + if (hasCustomArgs()) "\n\nTap to reset server settings and retry." else "\n\nTap to retry."
+                    tap = {
+                        if (hasCustomArgs()) prefs.edit().remove("srv").remove("srv_coder").apply()
+                        restartServer()
                     }
                 }
             }
@@ -173,14 +172,37 @@ class MainActivity : Activity() {
             setOnClickListener { tap?.invoke() }
         }
         web = WebView(this).apply {
-            settings.javaScriptEnabled = true; settings.domStorageEnabled = true
+            settings.javaScriptEnabled = true
+            settings.domStorageEnabled = true
+            settings.allowFileAccess = true
+            settings.allowContentAccess = true
+            // UI is loaded from filesDir; chat API is still http://127.0.0.1:8080
+            @Suppress("DEPRECATION")
+            settings.allowFileAccessFromFileURLs = true
+            @Suppress("DEPRECATION")
+            settings.allowUniversalAccessFromFileURLs = true
+            settings.mixedContentMode = android.webkit.WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
             setBackgroundColor(0xFF202020.toInt()); visibility = View.GONE
             webViewClient = object : WebViewClient() {
                 override fun shouldOverrideUrlLoading(v: WebView, r: WebResourceRequest): Boolean {
                     val u = r.url
-                    if (u.host == "127.0.0.1" && (u.port == 8080 || u.port == 8081)) return false
+                    if (u.scheme == "file") return false
+                    if (u.host == "127.0.0.1" && (u.port == 8080 || u.port == 8081 || u.port == 8082)) return false
                     try { startActivity(Intent(Intent.ACTION_VIEW, u)) } catch (_: Exception) {}
                     return true
+                }
+                override fun onReceivedError(
+                    view: WebView,
+                    request: android.webkit.WebResourceRequest,
+                    error: android.webkit.WebResourceError
+                ) {
+                    if (!request.isForMainFrame) return
+                    // Model server down — fall back to local UI so the app is never a blank error page
+                    val url = request.url?.toString().orEmpty()
+                    if (url.startsWith("http://127.0.0.1:8080")) {
+                        Log.w("Kojot", "8080 unavailable (${error.description}); loading local UI")
+                        view.post { loadLocalUi(force = true) }
+                    }
                 }
             }
             addJavascriptInterface(Bridge(), "Native")
@@ -202,6 +224,8 @@ class MainActivity : Activity() {
         }
         if (model.exists()) {
             prepareWww()
+            // Show local UI immediately — do not wait for llama-server (avoids ERR_CONNECTION_REFUSED)
+            showWeb()
             bindAndStartService()
         } else pickModel()
     }
@@ -217,23 +241,36 @@ class MainActivity : Activity() {
         }
     }
 
-    private fun showWeb() {
+    private fun uiIndexFile(): File = File(filesDir, "www/index.html")
+
+    /** Load the chat UI from app files (independent of llama-server). */
+    private fun loadLocalUi(force: Boolean = false) {
+        prepareWww()
+        val index = uiIndexFile()
+        if (!index.isFile) {
+            msg.visibility = View.VISIBLE
+            msg.text = "UI assets missing. Reinstall the app."
+            return
+        }
         msg.visibility = View.GONE
         web.visibility = View.VISIBLE
-        // Only (re)load if we haven't loaded yet or were on the splash
-        if (web.url.isNullOrBlank() || web.url == "about:blank") {
-            web.loadUrl("http://127.0.0.1:8080/")
+        val target = "file://${index.absolutePath}"
+        val cur = web.url.orEmpty()
+        if (force || cur.isBlank() || cur == "about:blank" || cur.startsWith("http://127.0.0.1")) {
+            web.loadUrl(target)
         }
+    }
+
+    private fun showWeb() {
+        loadLocalUi(force = false)
     }
 
     /** In-UI frosted toast instead of hiding the WebView (avoids "app minimized" feel). */
     private fun notifyModelLoading(loading: Boolean, message: String = "Model loading…") {
         runOnUiThread {
-            // Keep WebView visible whenever possible
+            // Keep WebView visible whenever possible — local UI, not 8080
             if (web.visibility != View.VISIBLE && model.exists()) {
-                msg.visibility = View.GONE
-                web.visibility = View.VISIBLE
-                if (web.url.isNullOrBlank()) web.loadUrl("http://127.0.0.1:8080/")
+                loadLocalUi(force = false)
             }
             val safe = JSONObject.quote(message)
             val js = "try{window.__modelLoading&&window.__modelLoading($loading,$safe)}catch(e){}"
@@ -246,11 +283,37 @@ class MainActivity : Activity() {
         }
     }
 
+    /**
+     * Copy packaged www (index + Monaco vs/ + vendor) into filesDir.
+     * Avoids deleteRecursively on every call so an open file:// UI is not wiped mid-session.
+     */
     private fun prepareWww() {
-        val www = File(filesDir, "www").apply { deleteRecursively(); mkdirs() }
+        val www = File(filesDir, "www")
+        val index = File(www, "index.html")
         val hasWww = try { (assets.list("www") ?: emptyArray()).isNotEmpty() } catch (_: Exception) { false }
-        if (hasWww) copyAssetDir("www", www)
-        else assets.open("index.html").use { i -> File(www, "index.html").outputStream().use { i.copyTo(it) } }
+        // Refresh when missing, or when packaged index is newer/different size
+        val needCopy = !index.isFile || run {
+            try {
+                val assetLen = assets.open("www/index.html").use { it.available().toLong() }
+                index.length() != assetLen
+            } catch (_: Exception) {
+                try {
+                    assets.open("index.html").use { it.available().toLong() } != index.length()
+                } catch (_: Exception) { true }
+            }
+        }
+        if (!needCopy) return
+        www.mkdirs()
+        if (hasWww) {
+            // Overlay copy (do not delete vs/ mid-flight)
+            copyAssetDir("www", www)
+        } else {
+            try {
+                assets.open("index.html").use { i -> File(www, "index.html").outputStream().use { i.copyTo(it) } }
+            } catch (e: Exception) {
+                Log.e("Kojot", "prepareWww failed: ${e.message}")
+            }
+        }
     }
 
     private fun copyAssetDir(assetPath: String, dest: File) {
