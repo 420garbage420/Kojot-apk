@@ -652,13 +652,20 @@ const Cap = {
         <button id="resume-dismiss" style="height:32px;padding:0 14px;border-radius:999px;border:1px solid var(--line-strong);font-weight:500">Dismiss</button>
       </div>`;
     hero.appendChild(b);
-    $('#resume-go').onclick=()=>{
+    $('#resume-go').onclick=async()=>{
       let c=chats.find(x=>x.id===r.id);
       if(!c){c={id:r.id,title:r.title||'Resumed',messages:r.messages||[],task:r.task};chats.unshift(c)}
       else{c.task=r.task;if(!c.messages.length)c.messages=r.messages||[]}
       cid=c.id;this.clearResume();save();render();
-      // nudge continue
-      send('continue');
+      // Wait for model health before continue — avoids instant error banner
+      let ok=false;
+      for(let i=0;i<15 && !ok;i++){ ok=await ping(); if(!ok) await new Promise(r=>setTimeout(r,1000)); }
+      if(ok) send('continue');
+      else {
+        const a=c.messages.at(-1);
+        if(a&&a.role==='assistant'){ a.error=''; a.content=(a.content||'')||'Model is still loading. Try sending "continue" in a moment.'; }
+        save(); render();
+      }
     };
     $('#resume-dismiss').onclick=()=>{this.clearResume();b.remove()};
   },
@@ -984,7 +991,7 @@ function render(){const c=cur(),th=$('#th');th.innerHTML='';
   const imgH=m.image?`<img src="${ea(m.image)}" style="max-width:160px;max-height:160px;border-radius:10px;margin-bottom:6px;display:block">`:'';
   d.innerHTML=`${imgH}<div>${esc(m.content)}</div>${tStr?`<time class="ts">${tStr}</time>`:''}`}
   else{d.className='turn a';d.innerHTML=turnHTML();const last=i===c.messages.length-1;paint(d,m,last,i);
-   if(m.error)d.insertAdjacentHTML('beforeend',`<div class="notice"><div><b>Couldn't reach the model.</b> ${esc(m.error)}. Is llama-server running at ${esc(cfg.url)}?</div><button data-retry>Retry</button></div>`);
+   if(m.error)d.insertAdjacentHTML('beforeend',`<div class="notice" data-err-notice><div><b>Couldn't reach the model.</b> ${esc(m.error)}. ${(NI&&NI.server_ready)?'Try Retry.':'Model may still be loading — wait a few seconds, then Retry.'}</div><div style="display:flex;gap:8px;margin-top:8px"><button data-retry>Retry</button><button data-dismiss-err>Dismiss</button></div></div>`);
    else if(!(busy&&last)&&m.content)d.insertAdjacentHTML('beforeend',`<div class="acts"><button class="ib" data-cp aria-label="Copy" title="Copy">${I.copy}</button><button class="ib" data-dl aria-label="Download Markdown" title="Download .md">${I.dl}</button>${last?`<button class="ib" data-retry aria-label="Regenerate">${I.redo}</button>`:''}</div>`)}
   th.appendChild(d)});
  hist();sc()}
@@ -2133,24 +2140,31 @@ const PDF = {
   },
 
   showAiSheet(){
-    const html = `<p style="font-size:12px;color:var(--fg-3);margin:0 0 10px;line-height:1.4">Describe how to fill this form. Uses your <b>local</b> model + the field list only — the PDF file stays on device.</p>
-<textarea id="pdf-ai-in" placeholder="e.g. Name Jane Doe, date today, check Agree to terms"></textarea>
-<button class="btn sm go" id="pdf-ai-run" style="width:100%;margin-top:10px">Fill with local model</button>
-<div id="pdf-ai-status" style="font-size:11px;color:var(--fg-3);margin-top:8px;font-family:var(--mono)"></div>`;
+    const nFields = (this.fields||[]).length;
+    const html = `<p style="font-size:12px;color:var(--fg-3);margin:0 0 10px;line-height:1.4">Describe how to fill this form. Uses your <b>local</b> chat model and the field list only.</p>
+<textarea id="pdf-ai-in" placeholder="e.g. Name Jane Doe, date today, check Agree to terms" style="width:100%;min-height:88px;background:var(--bg);border:1px solid var(--line);color:var(--fg);font-size:14px;padding:10px 12px;border-radius:10px;resize:vertical"></textarea>
+<button type="button" id="pdf-ai-run" style="width:100%;margin-top:10px;padding:12px;border-radius:12px;border:0;background:var(--accent);color:var(--on-accent);font-weight:600;font-size:14px;cursor:pointer">Fill with local model${nFields?'' : ' (no fields yet)'}</button>
+<div id="pdf-ai-status" style="font-size:11px;color:var(--fg-3);margin-top:8px;font-family:var(--mono)">${nFields? nFields+' fields detected':'No AcroForm fields — open a fillable PDF first'}</div>`;
     this.openSheet('AI Fill', html);
-    $('#pdf-ai-run')?.addEventListener('click', async()=>{
-      const instr = ($('#pdf-ai-in')?.value||'').trim();
-      if(!instr){ this.toast('Enter instructions', true); return; }
-      const st=$('#pdf-ai-status'); if(st) st.textContent='Running…';
-      try{
-        const n = await this.aiFill(instr);
-        if(st) st.textContent='Updated '+n+' field(s). Review Fields, then Save.';
-        this.toast('Updated '+n+' field(s)');
-      }catch(e){
-        if(st) st.textContent=String(e.message||e);
-        this.toast(String(e.message||e), true);
-      }
-    });
+  },
+  async runAiFillFromUi(){
+    const instr = ($('#pdf-ai-in')?.value||'').trim();
+    if(!instr){ this.toast('Enter instructions first', true); return; }
+    const btn = $('#pdf-ai-run');
+    const st = $('#pdf-ai-status');
+    if(btn){ btn.disabled=true; btn.textContent='Running…'; btn.style.opacity='0.7'; }
+    if(st) st.textContent='Calling local model…';
+    try{
+      const n = await this.aiFill(instr);
+      if(st) st.textContent='Updated '+n+' field(s). Open Fields to review, then Save.';
+      this.toast('Updated '+n+' field(s)');
+      if(btn){ btn.disabled=false; btn.textContent='Fill with local model'; btn.style.opacity='1'; }
+    }catch(e){
+      const msg = String(e.message||e);
+      if(st) st.textContent=msg;
+      this.toast(msg, true);
+      if(btn){ btn.disabled=false; btn.textContent='Fill with local model'; btn.style.opacity='1'; }
+    }
   },
 
   async aiFill(instruction){
@@ -2368,6 +2382,15 @@ $('#pdf-btn-ocr')?.addEventListener('click',async()=>{
 $('#pdf-btn-ai')?.addEventListener('click',()=>{
   if(!PDF.path){ PDF.toast('Open a PDF first', true); return; }
   PDF.showAiSheet();
+});
+// Event delegation — dynamic sheet buttons (AI Fill, etc.)
+document.addEventListener('click', (e)=>{
+  const t = e.target;
+  if(!t) return;
+  if(t.id==='pdf-ai-run' || t.closest?.('#pdf-ai-run')){
+    e.preventDefault();
+    PDF.runAiFillFromUi();
+  }
 });
 
 // Signature pad
@@ -2619,7 +2642,29 @@ $('#th').onclick=e=>{const t=e.target;if(t.closest('.chip'))return send(t.textCo
 $('#st').onclick=()=>sheet(true);$('#ss').onclick=e=>{if(e.target.id==='ss')done()};$('#s-x').onclick=$('#s-ok').onclick=done;
 document.addEventListener('visibilitychange',()=>{if(!document.hidden){ninfo();filesUI()}});
 matchMedia('(prefers-color-scheme:light)').addEventListener('change',theme);
-theme();setBusy(false);render();ping();syncVisionUI();
+theme();setBusy(false);render();
+(async()=>{
+  // Retry health a few times while FGS is still loading the model — avoid sticky error banners
+  let ok=false;
+  for(let i=0;i<20 && !ok;i++){
+    ok=await ping();
+    if(!ok) await new Promise(r=>setTimeout(r,1500));
+  }
+  if(ok){
+    // Clear stale "Couldn't reach the model" from previous cold starts
+    let dirty=false;
+    chats.forEach(c=>{(c.messages||[]).forEach(m=>{
+      if(m&&m.role==='assistant'&&m.error){
+        const e=String(m.error);
+        if(/Failed|fetch|network|timeout|reach|ECONN|HTTP|abort/i.test(e)||!m.content){
+          m.error=''; dirty=true;
+        }
+      }
+    })});
+    if(dirty){try{save()}catch(_){} render();}
+  }
+  syncVisionUI();
+})();
 
 /* =========================================================
    MONACO CODE EDITOR (offline, native bridge, local model)
