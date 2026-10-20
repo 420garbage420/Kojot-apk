@@ -2198,24 +2198,91 @@ async function pdfTool(name, a){
 function showPdf(on){ PDF.show(on); }
 
 async function pdfPickAndOpen(){
-  try{
-    // Prefer a simple path under workspace; list root for hints
-    let hint='.';
+  PDF.show(true);
+  let listHtml = '<div style="color:var(--fg-3);font-size:12px;padding:8px 0">Looking for PDFs…</div>';
+  const body = `
+<div style="display:flex;flex-direction:column;gap:10px">
+  <div style="font-size:12px;color:var(--fg-3);line-height:1.4">Pick a PDF from the workspace, or type a relative path.</div>
+  <input id="pdf-path-in" type="text" placeholder="e.g. forms/w9.pdf" autocapitalize="off" spellcheck="false"
+    style="width:100%;background:var(--bg);border:1px solid var(--line);color:var(--fg);font-size:14px;padding:10px 12px;border-radius:10px;outline:none;font-family:var(--mono)">
+  <button class="btn sm go" id="pdf-path-go" style="width:100%">Open path</button>
+  <div id="pdf-pick-list">${listHtml}</div>
+</div>`;
+  PDF.openSheet('Open PDF', body);
+  const input = $('#pdf-path-in');
+  const go = async ()=>{
+    const path = (input?.value||'').trim();
+    if(!path){ PDF.toast('Enter a path', true); return; }
     try{
-      const ls=J.parse(await nat('list_dir',{path:'.',limit:40}));
-      const pdfs=(ls.data&&ls.data.entries||[]).filter(e=>!e.d && /\.pdf$/i.test(e.n)).map(e=>e.p||e.n);
-      if(pdfs.length) hint = pdfs.slice(0,8).join(', ');
-    }catch(_){}
-    const path = prompt('PDF path in workspace (e.g. forms/w9.pdf)'+(hint&&hint!=='.'?'\n\nPDFs in root: '+hint:''));
-    if(!path) return;
-    PDF.show(true);
-    await PDF.openPath(path.trim());
-  }catch(e){
-    PDF.toast(String(e.message||e), true);
-  }
+      PDF.closeSheet();
+      PDF.toast('Opening…');
+      await PDF.openPath(path);
+    }catch(e){ PDF.toast(String(e.message||e), true); }
+  };
+  $('#pdf-path-go')?.addEventListener('click', go);
+  input?.addEventListener('keydown', e=>{ if(e.key==='Enter'){ e.preventDefault(); go(); } });
+  // Async populate file list
+  (async()=>{
+    const box = $('#pdf-pick-list');
+    if(!box) return;
+    try{
+      let entries = [];
+      try{
+        const found = J.parse(await nat('find_files',{query:'*.pdf',path:'.',max:40}));
+        const arr = (found.data && (found.data.entries||found.data.files||found.data.results)) || [];
+        if(Array.isArray(arr) && arr.length){
+          entries = arr.map(e=>{
+            if(typeof e==='string') return e;
+            return e.p || e.path || e.n || e.name || '';
+          }).filter(Boolean);
+        } else if(found.text){
+          // parse paths from text lines
+          entries = String(found.text).split('\n').map(l=>l.trim()).filter(l=>/\.pdf$/i.test(l)).map(l=>l.replace(/^\[[^\]]+\]\s*/,'').split(/\s+/)[0]).filter(Boolean);
+        }
+      }catch(_){}
+      if(!entries.length){
+        try{
+          const ls=J.parse(await nat('list_dir',{path:'.',limit:80}));
+          const kids=(ls.data&&ls.data.entries)||[];
+          entries = kids.filter(e=>!e.d && /\.pdf$/i.test(e.n||'')).map(e=>e.p||e.n);
+          // also peek one level of dirs
+          for(const d of kids.filter(e=>e.d).slice(0,8)){
+            try{
+              const sub=J.parse(await nat('list_dir',{path:d.p||d.n,limit:30}));
+              const sube=(sub.data&&sub.data.entries)||[];
+              entries.push(...sube.filter(e=>!e.d && /\.pdf$/i.test(e.n||'')).map(e=>e.p||((d.p||d.n)+'/'+e.n)));
+            }catch(_){}
+          }
+        }catch(e){
+          box.innerHTML = '<div style="color:var(--ember);font-size:12px;padding:8px 0">'+esc(String(e.message||e))+'<br><span style="color:var(--fg-3)">Grant Files access in Settings if needed.</span></div>';
+          return;
+        }
+      }
+      entries = [...new Set(entries)].filter(p=>/\.pdf$/i.test(p)).slice(0,40);
+      if(!entries.length){
+        box.innerHTML = '<div style="color:var(--fg-3);font-size:12px;padding:8px 0">No PDFs found under the workspace root. Type a path above, or copy a .pdf into the workspace.</div>';
+        return;
+      }
+      box.innerHTML = entries.map(p=>
+        `<button type="button" data-pdf="${ea(p)}" style="display:block;width:100%;text-align:left;padding:12px 12px;margin:0 0 6px;border-radius:10px;border:1px solid var(--line);background:var(--bg-subtle);color:var(--fg);font-size:13px;font-family:var(--mono);cursor:pointer">${esc(p)}</button>`
+      ).join('');
+      box.querySelectorAll('[data-pdf]').forEach(btn=>{
+        btn.addEventListener('click', async()=>{
+          const path = btn.getAttribute('data-pdf');
+          try{
+            PDF.closeSheet();
+            PDF.toast('Opening…');
+            await PDF.openPath(path);
+          }catch(e){ PDF.toast(String(e.message||e), true); }
+        });
+      });
+    }catch(e){
+      box.innerHTML = '<div style="color:var(--ember);font-size:12px">'+esc(String(e.message||e))+'</div>';
+    }
+  })();
 }
 
-$('#pdf-open')?.addEventListener('click',()=>{drawer(false); showPdf(true);});
+$('#pdf-open')?.addEventListener('click',()=>{drawer(false); showPdf(true); if(!PDF.path) pdfPickAndOpen();});
 $('#pdf-toggle')?.addEventListener('click',()=>showPdf(!$('#pdf-view')?.classList.contains('on')));
 $('#pdf-back')?.addEventListener('click',()=>showPdf(false));
 $('#pdf-x')?.addEventListener('click',()=>showPdf(false));
