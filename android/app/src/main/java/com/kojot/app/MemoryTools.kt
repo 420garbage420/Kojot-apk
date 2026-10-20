@@ -196,7 +196,7 @@ class MemoryTools(private val dbFile: File, private val workspace: () -> File) {
         if (!embOnline && !checkEmbedding()) return null
         return try {
             val body = JSONObject()
-                .put("input", text.take(1500))
+                .put("input", text.take(1000))
                 .put("model", "nomic")
                 .toString()
             val c = URL(embUrl).openConnection() as HttpURLConnection

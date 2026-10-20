@@ -594,7 +594,7 @@ textarea.in{height:auto;min-height:64px;padding:9px 12px;font:13px/19px var(--mo
 </div></div>
 <script>
 const $=s=>document.querySelector(s),LS=localStorage,J=JSON;
-const DEF={url:'http://127.0.0.1:8080',sys:'You are a helpful, concise assistant.',t:.7,m:1024,theme:'auto',power:false,thoughts:true,vision:false,coder_t:0.1,p_coder:{},srv_coder:{},xj_coder:'',files:true,ask:true,github:{token:'',repo:'420garbage420/kojot'},search:{on:true,prov:'tavily',keys:{},max:5,depth:'basic',sx:'',cu:'',cm:'GET',ch:'',cb:''},p:{},srv:{},xj:'',project:{name:'',conventions:''},profile:'balanced',auto_coder:true,tool_cache:true,mem_auto:true,file_gates:[],ocr_engine:'mlkit',ocr_path:'',ext_models:{}};
+const DEF={url:'http://127.0.0.1:8080',sys:'You are a helpful, concise assistant.',t:.7,m:1024,theme:'auto',power:false,thoughts:true,vision:false,coder_t:0.1,p_coder:{},srv_coder:{},xj_coder:'',files:true,ask:true,github:{token:'',repo:'420garbage420/kojot'},search:{on:true,prov:'tavily',keys:{},max:5,depth:'basic',sx:'',cu:'',cm:'GET',ch:'',cb:''},p:{},srv:{},xj:'',project:{name:'',conventions:''},profile:'balanced',auto_coder:false,tool_cache:true,mem_auto:true,file_gates:[],ocr_engine:'mlkit',ocr_path:'',ext_models:{}};
 const saved=(()=>{try{return J.parse(LS.getItem('lc.cfg')||'{}')}catch{return{}}})();
 const cfg={...DEF,...saved,search:{...DEF.search,...saved.search,keys:{...(saved.search||{}).keys}},p:{...saved.p},srv:{...saved.srv}};
 if(cfg.xj && (cfg.xj.includes('enable_thinking') || cfg.xj.includes('qwen')) && !cfg.xj_coder){
@@ -883,7 +883,18 @@ function theme(){const t=cfg.theme==='auto'?(matchMedia('(prefers-color-scheme:l
 /* ---------- native bridge ---------- */
 const nq=new Map();let nid=0;
 window.__nat=(id,ok,p)=>{const q=nq.get(id);nq.delete(id);if(q)ok?q.res(p):q.rej(Error(p))};
-function nat(op,args){return new Promise((res,rej)=>{if(!window.Native)return rej(Error('Native bridge unavailable — open this in the Android app'));const id=++nid;nq.set(id,{res,rej});Native.call(id,op,J.stringify(args||{}))})}
+function nat(op,args,timeoutMs){
+  return new Promise((res,rej)=>{
+    if(!window.Native)return rej(Error('Native bridge unavailable — open this in the Android app'));
+    const id=++nid;
+    const ms=timeoutMs||120000;
+    const timer=setTimeout(()=>{
+      if(nq.has(id)){nq.delete(id);rej(Error('Native call timed out: '+op+' ('+ms+'ms)'))}
+    },ms);
+    nq.set(id,{res:(v)=>{clearTimeout(timer);res(v)},rej:(e)=>{clearTimeout(timer);rej(e)}});
+    try{Native.call(id,op,J.stringify(args||{}))}catch(e){clearTimeout(timer);nq.delete(id);rej(e)}
+  });
+}
 function ninfo(){try{NI=window.Native?J.parse(Native.info()):null}catch{NI=null}return NI}
 ninfo();
 
@@ -3110,34 +3121,22 @@ function setEdDirty(s){edDirty=s;$('#ed-dirty').classList.toggle('on',!!s)}
 function showEditor(on){
   setTimeout(syncBack, 10);
   const eng = $('#ed-engine');
-  if (on) {
-    try{ ninfo(); }catch(_){}
-    if (NI && NI.coder_model) {
-      if (eng) { eng.textContent = 'Swapping to Coder…'; eng.style.color = 'var(--gold)'; }
-      (async()=>{
-        const label=()=>{
-          if(!eng)return;
-          const clean=(NI?.coder_name||'Coder').replace(/\.gguf$/i,'').slice(0,16);
-          const cCtx=(NI?.srv_coder?.ctx||32768)/1024;
-          eng.textContent=clean+' ('+cCtx+'k)';
-          eng.style.color='var(--cyan)';
-        };
-        try{
-          const r=await Route.forEditor(true);
-          await ninfo();
-          if(r&&r.ok) label();
-          else if(eng){ eng.textContent='Main Engine'; eng.style.color='var(--fg-3)'; }
-        }catch(_){ if(eng){ eng.textContent='Main Engine'; eng.style.color='var(--fg-3)'; } }
-      })();
-    } else if (eng) {
-      eng.textContent = 'Main Engine'; eng.style.color = 'var(--fg-3)';
-    }
-  } else {
-    try{ ninfo(); }catch(_){}
-    if (NI && NI.model_present && NI.active_slot === 'coder') {
-      Route.forEditor(false).catch(()=>{});
+  // Do NOT swap models just for opening the editor — that was a primary crash/OOM path.
+  // AI edit chains still soft-swap when power/auto_coder is on via Route.forChatTurn / ensure.
+  try{ ninfo(); }catch(_){}
+  if (eng) {
+    if (NI && NI.active_slot === 'coder' && NI.coder_model) {
+      const clean=(NI.coder_name||'Coder').replace(/\.gguf$/i,'').slice(0,16);
+      const cCtx=(NI.srv_coder?.ctx||8192)/1024;
+      eng.textContent=clean+' ('+cCtx+'k)';
+      eng.style.color='var(--cyan)';
+    } else {
+      eng.textContent = 'Main Engine';
+      eng.style.color = 'var(--fg-3)';
     }
   }
+  // Free OCR RAM only (cheap) — never kill chat for Monaco
+  if (on) { try{ nat('stop_ocr',{}); }catch(_){} }
   try{
     $('#editor-view').classList.toggle('on',on);
     document.querySelector('.main')?.classList.toggle('hidden-for-ed',on);
@@ -3236,9 +3235,13 @@ async function edRenderBrowser(){
       row.onclick=async()=>{
         if(e.d){edPath=e.p;edRenderBrowser();return}
         try{
+          if(e.s!=null && e.s>1024*1024){edToast('File too large for editor (>1MB)','error',3500);return}
           const raw=await nat('read_file',{path:e.p,full:true});
           const j=JSON.parse(raw);const text=j.text||'';
-          // If truncated, re-read without limit via a full write path — use max 8000 for safety in editor seed
+          if(/is a binary file/i.test(text)||text.indexOf('\0')>=0){
+            edToast('Binary file — not opened in editor','error',3500);return;
+          }
+          if(text.length>1024*1024){edToast('Content too large for editor','error',3500);return}
           if(!ed)initMonaco();
           const apply=()=>{ed.setValue(text);edFile=e.p;$('#ed-fname').textContent=e.p;try{monaco.editor.setModelLanguage(ed.getModel(),edLang(e.p))}catch(_e){try{monaco.editor.setModelLanguage(ed.getModel(),'plaintext')}catch(__){}};setEdDirty(false);$('#ed-fbrowser').classList.remove('open');edToast('Opened '+e.p,'ok')};
           if(ed)apply();else setTimeout(apply,600);
@@ -3674,11 +3677,7 @@ async function refreshModelsList(){
   const box=$('#models-list'); if(!box)return;
   box.innerHTML='<div style="color:var(--fg-3);padding:8px">Loading…</div>';
   try{
-    // Fill empty slots from category folders (llm/embed/coder/ocr) without overwriting binds
-    try{
-      const ab=JSON.parse(await nat('auto_bind_models',{}));
-      if(ab&&ab.bound&&ab.bound.length){ /* quiet — status updates via ninfo */ }
-    }catch(_){}
+    // Listing only — do not auto_bind/restartServers on every Settings open
     const r=JSON.parse(await nat('list_models_dir',{}));
     const models=(r.models)||[];
     if($('#models-dir-in') && r.path) $('#models-dir-in').value=r.path;

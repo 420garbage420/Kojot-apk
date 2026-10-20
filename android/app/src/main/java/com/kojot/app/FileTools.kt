@@ -64,7 +64,8 @@ class FileTools(rootDir: File, private val gates: List<String> = emptyList()) {
         .put("s", if (f.isDirectory) 0L else f.length()).put("m", dateFmt.format(Date(f.lastModified())))
 
     private fun entryLine(f: File): String =
-        if (f.isDirectory) "[dir]  ${f.name}/  (${f.listFiles()?.size ?: "?"} items)"
+        // Avoid listFiles() per dir entry (N+1 FUSE scans) — viewer uses JSON entries only
+        if (f.isDirectory) "[dir]  ${f.name}/"
         else "[file] ${f.name}  ${sz(f.length())}  ${dateFmt.format(Date(f.lastModified()))}"
 
     private fun result(text: String, data: JSONObject? = null): JSONObject =
@@ -129,9 +130,13 @@ class FileTools(rootDir: File, private val gates: List<String> = emptyList()) {
         val f = safe(a.optString("path"))
         if (!f.isFile) throw ToolError("not a file: ${rel(f)}")
         if (a.optBoolean("full", false)) {
-                    if (f.length() > 10L * 1024 * 1024) throw ToolError("file too large (>10MB)")
+                    if (f.length() > 2L * 1024 * 1024) throw ToolError("file too large for full read (>2MB)")
                     val bytes = f.readBytes()
-                    if (bytes.any { it.toInt() == 0 }) return result("${rel(f)} is a binary file (${sz(f.length())}); not shown.")
+                    if (bytes.any { it.toInt() == 0 }) {
+                        // Flag so editors must not treat this as savable content
+                        return result("${rel(f)} is a binary file (${sz(f.length())}); not shown.")
+                            .put("data", JSONObject().put("binary", true).put("size", f.length()))
+                    }
                     return result(String(bytes, Charsets.UTF_8))
                 }
                 val max = a.optInt("max_chars", 3000).coerceIn(200, 8000)

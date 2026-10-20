@@ -45,9 +45,13 @@ class LlamaService : Service() {
         private set
     @Volatile var lastError: String? = null
         private set
+    /** Bumps on every boot/swap so a stale boot thread aborts instead of orphaning a process. */
+    @Volatile private var bootGen: Int = 0
+    @Volatile private var booting: Boolean = false
 
     private var wakeLock: PowerManager.WakeLock? = null
     private var readyListeners = mutableListOf<(Boolean, String?) -> Unit>()
+    private val bootLock = Any()
 
     /** Prefer external path (no copy) when set and readable; else optional filesDir fallback. */
     private fun resolveModel(prefKey: String, fallbackName: String): File {
@@ -100,8 +104,9 @@ class LlamaService : Service() {
             }
             ACTION_START, null -> {
                 promoteForeground("Starting model…")
-                if (modelFile().exists() && (proc?.isAlive != true)) {
-                    thread { boot(null, null) }
+                // Only boot if nothing is alive and no boot in flight (avoids double-bind on :8080)
+                if (modelFile().exists() && proc?.isAlive != true && !booting) {
+                    startServers()
                 }
             }
         }
@@ -133,18 +138,32 @@ class LlamaService : Service() {
     }
 
     fun startServers() {
+        synchronized(bootLock) {
+            if (booting) {
+                Log.i(TAG, "startServers ignored — boot already in flight")
+                return
+            }
+            if (proc?.isAlive == true && ready) {
+                Log.i(TAG, "startServers ignored — already ready")
+                return
+            }
+            booting = true
+        }
         promoteForeground("Loading model…")
-        thread { boot(null, null) }
+        val gen = ++bootGen
+        thread { boot(null, null, gen) }
     }
 
     fun restartServers() {
+        synchronized(bootLock) { booting = true }
         promoteForeground("Restarting model…")
         val old = proc; proc = null
         val oldEmb = embProc; embProc = null
         embReady = false
         ocrReady = false
         ready = false
-        thread { boot(old, oldEmb) }
+        val gen = ++bootGen
+        thread { boot(old, oldEmb, gen) }
     }
 
     fun swapModel(slot: String): JSONObject {
@@ -169,7 +188,8 @@ class LlamaService : Service() {
             val p = ProcessBuilder(serverArgs(exe.path, www.path)).redirectErrorStream(true).start()
             proc = p
             thread { p.inputStream.bufferedReader().forEachLine { Log.d("llama", it) } }
-            for (i in 0 until 60) {
+            // Match boot() patience (~5 min) — big models on FUSE exceed 21s easily
+            for (i in 0 until 300) {
                 if (!p.isAlive) {
                     val err = "Exited with code ${p.exitValue()}"
                     notifyReady(false, err)
@@ -185,7 +205,7 @@ class LlamaService : Service() {
                         return JSONObject().put("ok", true).put("slot", activeSlot).put("model", activeModelFile().name)
                     }
                 } catch (_: Exception) {}
-                Thread.sleep(350)
+                Thread.sleep(1000)
             }
             val err = "Startup timed out"
             notifyReady(false, err)
@@ -216,8 +236,10 @@ class LlamaService : Service() {
                 out.put("stopped_ocr", prevOcr)
             }
             "ocr", "vision" -> {
-                // Pause main GGUF so vision can fit on mid-RAM phones
-                if (proc?.isAlive == true) {
+                // Only pause chat when a vision GGUF+mmproj can actually start
+                val ocrFile = ocrModelFile()
+                val canVision = ocrFile.isFile && findMmproj(ocrFile) != null
+                if (canVision && proc?.isAlive == true) {
                     slotBeforeOcr = activeSlot
                     try {
                         proc?.destroy()
@@ -227,13 +249,14 @@ class LlamaService : Service() {
                     ready = false
                     promoteForeground("Pausing chat for OCR…")
                 }
-                val ok = ensureOcr(60_000L)
+                val ok = if (canVision) ensureOcr(60_000L) else false
                 JSONObject()
-                    .put("ok", ok)
+                    .put("ok", ok || !canVision) // ML Kit path is fine without vision server
                     .put("slot", "ocr")
                     .put("ocr_ready", ok)
                     .put("paused_slot", slotBeforeOcr)
-                    .put("text", if (ok) "OCR vision ready" else "OCR unavailable (ML Kit fallback)")
+                    .put("mlkit", !canVision)
+                    .put("text", if (ok) "OCR vision ready" else "OCR via ML Kit (no vision GGUF/mmproj)")
             }
             "chat_resume", "resume" -> {
                 stopOcr()
@@ -285,18 +308,22 @@ class LlamaService : Service() {
     fun isEmbAlive(): Boolean = embProc?.isAlive == true
     fun isOcrAlive(): Boolean = ocrProc?.isAlive == true && ocrReady
 
-    private fun boot(old: Process?, oldEmb: Process?) {
+    private fun boot(old: Process?, oldEmb: Process?, gen: Int) {
         try {
             old?.let { it.destroy(); try { it.waitFor() } catch (_: Exception) {} }
             oldEmb?.let { it.destroy(); try { it.waitFor() } catch (_: Exception) {} }
+            // Also kill any leftover OCR from a previous generation
+            try { stopOcr() } catch (_: Exception) {}
+
+            if (gen != bootGen) {
+                Log.i(TAG, "boot gen $gen aborted (current $bootGen)")
+                return
+            }
 
             acquireWakeLock()
             val www = File(filesDir, "www").apply { if (!exists()) mkdirs() }
-            // www assets are copied by Activity before start; service only needs the dir present
-
             val exe = File(applicationInfo.nativeLibraryDir, "libllama_server.so")
             startEmbedding(exe)
-            // OCR server is lazy — started only when ocr_pdf/ocr_image needs it (avoids OOM)
 
             if (!modelFile().isFile && !(activeSlot == "coder" && coderModelFile().isFile)) {
                 notifyReady(false, "No model file")
@@ -304,11 +331,17 @@ class LlamaService : Service() {
                 return
             }
 
+            if (gen != bootGen) return
+
             val p = ProcessBuilder(serverArgs(exe.path, www.path)).redirectErrorStream(true).start()
             proc = p
             thread { p.inputStream.bufferedReader().forEachLine { Log.d("llama", it) } }
 
             repeat(300) {
+                if (gen != bootGen) {
+                    try { p.destroy() } catch (_: Exception) {}
+                    return
+                }
                 if (!p.isAlive) {
                     val code = try { p.exitValue() } catch (_: Exception) { -1 }
                     val err = "Model server exited (code $code)"
@@ -336,6 +369,10 @@ class LlamaService : Service() {
             Log.e(TAG, "boot failed", e)
             notifyReady(false, e.message ?: "boot failed")
             updateNotification("Error: ${e.message}")
+        } finally {
+            synchronized(bootLock) {
+                if (gen == bootGen) booting = false
+            }
         }
     }
 
@@ -346,27 +383,31 @@ class LlamaService : Service() {
         val emb = embModelFile()
         if (!emb.isFile) return
         try {
+            // -c 2048: nomic paths/snippets exceed 512 tokens; ubatch matches
             val args = listOf(
                 exe.path, "-m", emb.path,
                 "--host", "127.0.0.1", "--port", "8081",
-                "--embedding", "-c", "512", "-t", "2"
+                "--embedding", "-c", "2048", "-b", "2048", "-ub", "2048", "-t", "2"
             )
             val p = ProcessBuilder(args).redirectErrorStream(true).start()
             embProc = p
             thread { p.inputStream.bufferedReader().forEachLine { Log.d("llama-emb", it) } }
             thread {
-                repeat(60) {
+                // Longer wait — chat model may be loading on the same cores
+                repeat(180) {
                     if (!p.isAlive) return@thread
                     try {
                         val c = URL("http://127.0.0.1:8081/health").openConnection() as HttpURLConnection
                         c.connectTimeout = 500; c.readTimeout = 500
                         if (c.responseCode == 200) {
                             embReady = true
+                            Log.i(TAG, "embedding server ready on :8081")
                             return@thread
                         }
                     } catch (_: Exception) {}
                     Thread.sleep(500)
                 }
+                Log.w(TAG, "embedding server health timeout")
             }
         } catch (e: Exception) {
             Log.e(TAG, "embedding failed: ${e.message}")
@@ -492,7 +533,8 @@ class LlamaService : Service() {
             val v = s.optString(key, "").trim()
             if (Regex("[a-z0-9_]{1,12}").matches(v)) { a.add(flag); a.add(v) }
         }
-        val defaultCtx = if (activeSlot == "coder") 32768 else 8192
+        // Coder default 8k — 32k KV on a 7B model is a common OOM on 12GB phones
+        val defaultCtx = if (activeSlot == "coder") 8192 else 8192
         num("ctx", "-c", defaultCtx); num("threads", "-t", 4); num("threads_batch", "-tb", 0)
         num("batch", "-b", 0); num("ubatch", "-ub", 0); num("parallel", "-np", 1)
         word("fa", "-fa"); word("ctk", "-ctk"); word("ctv", "-ctv")

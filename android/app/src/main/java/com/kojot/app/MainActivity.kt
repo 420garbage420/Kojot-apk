@@ -111,11 +111,14 @@ class MainActivity : Activity() {
             llama = binder.getService()
             bound = true
             llama?.addReadyListener(readyCb)
+            // Do NOT call startServers() here if onStartCommand already booted —
+            // a second boot races for :8080 and orphans the first process.
             if (llama?.ready == true) {
                 runOnUiThread { showWeb() }
-            } else if (llama?.isChatAlive() != true && model.exists()) {
+            } else if (llama?.isChatAlive() != true && model.exists() && llama?.ready != true) {
+                // Only start if service has no live process (cold bind after stop)
                 prepareWww()
-                llama?.startServers()
+                if (llama?.isChatAlive() != true) llama?.startServers()
             }
         }
         override fun onServiceDisconnected(name: ComponentName?) {
@@ -197,15 +200,36 @@ class MainActivity : Activity() {
                     error: android.webkit.WebResourceError
                 ) {
                     if (!request.isForMainFrame) return
-                    // Model server down — fall back to local UI so the app is never a blank error page
                     val url = request.url?.toString().orEmpty()
                     if (url.startsWith("http://127.0.0.1:8080")) {
                         Log.w("Kojot", "8080 unavailable (${error.description}); loading local UI")
                         view.post { loadLocalUi(force = true) }
                     }
                 }
+                // Without this, renderer OOM/kill terminates the whole process on API 26+
+                override fun onRenderProcessGone(
+                    view: WebView,
+                    detail: android.webkit.RenderProcessGoneDetail
+                ): Boolean {
+                    Log.e("Kojot", "WebView renderer gone crashed=${detail.didCrash()}")
+                    runOnUiThread {
+                        try {
+                            (view.parent as? android.view.ViewGroup)?.removeView(view)
+                        } catch (_: Exception) {}
+                        try { view.destroy() } catch (_: Exception) {}
+                        // Recreate activity to get a fresh WebView; model service stays up
+                        recreate()
+                    }
+                    return true
+                }
             }
             addJavascriptInterface(Bridge(), "Native")
+        }
+        // Log uncaught errors instead of silent process death where possible
+        val prevHandler = Thread.getDefaultUncaughtExceptionHandler()
+        Thread.setDefaultUncaughtExceptionHandler { t, e ->
+            Log.e("Kojot", "Uncaught on ${t.name}", e)
+            prevHandler?.uncaughtException(t, e)
         }
         setContentView(FrameLayout(this).apply {
             setBackgroundColor(0xFF202020.toInt()); addView(msg); addView(web)
@@ -247,14 +271,17 @@ class MainActivity : Activity() {
     private fun autoBindModelsFromDisk(): List<String> {
         val root = modelsDir()
         val bound = mutableListOf<String>()
-        // Drop prefs that point at missing/unreadable files so we can re-bind
+        // Do NOT wipe bindings when canRead() fails (permission not granted yet / storage
+        // remount). Only clear paths that clearly don't exist after we have files access.
         fun clearIfDead(pathKey: String, nameKey: String) {
+            if (!filesOk()) return
             val p = prefs.getString(pathKey, null) ?: return
             if (p.isBlank()) return
             val f = File(p)
-            if (!f.isFile || !f.canRead()) {
+            // exists() false and parent is reachable → truly gone; otherwise keep pref
+            if (!f.exists() && f.parentFile?.isDirectory == true) {
                 prefs.edit().remove(pathKey).remove(nameKey).apply()
-                Log.w("Kojot", "cleared dead $pathKey=$p")
+                Log.w("Kojot", "cleared missing $pathKey=$p")
             }
         }
         clearIfDead("model_path", "model_name")
@@ -273,9 +300,18 @@ class MainActivity : Activity() {
                 ?.sortedBy { it.length() }
                 ?: emptyList()
         }
+        /** Case-insensitive subfolder (LLM vs llm, OCR vs ocr, etc.). */
+        fun childDir(parent: File, name: String): File? {
+            val exact = File(parent, name)
+            if (exact.isDirectory) return exact
+            return parent.listFiles()?.firstOrNull {
+                it.isDirectory && it.name.equals(name, ignoreCase = true)
+            }
+        }
         fun firstIn(vararg subs: String): File? {
             for (sub in subs) {
-                val hit = listGgufs(File(root, sub)).firstOrNull()
+                val dir = childDir(root, sub) ?: continue
+                val hit = listGgufs(dir).firstOrNull()
                 if (hit != null) return hit
             }
             return null
@@ -1019,8 +1055,8 @@ class MainActivity : Activity() {
         }
         in PdfTools.OPS -> {
             if (!filesOk()) throw ToolError("Files access isn't granted yet. Open Settings → Tools → Files and tap Grant.")
-            // Demand-driven: pause chat/coder, start vision OCR if bound+mmproj, then run tool
-            if (op == "ocr_pdf" || op == "ocr_image") {
+            val needOcr = op == "ocr_pdf" || op == "ocr_image"
+            if (needOcr) {
                 try {
                     notifyModelLoading(true, "Loading OCR vision…")
                     llama?.ensureSlot("ocr")
@@ -1030,15 +1066,18 @@ class MainActivity : Activity() {
                     notifyModelLoading(false, "OCR fallback")
                 }
             }
-            val pdfResult = PdfTools(rootDir(), applicationContext).run(op, a)
-            if (op == "ocr_pdf" || op == "ocr_image") {
-                try {
-                    notifyModelLoading(true, "Restoring model after OCR…")
-                    llama?.ensureSlot("chat_resume")
-                    notifyModelLoading(false, "Model ready")
-                } catch (_: Exception) {}
+            try {
+                PdfTools(rootDir(), applicationContext).run(op, a)
+            } finally {
+                // Always restore chat even if PdfTools throws
+                if (needOcr) {
+                    try {
+                        notifyModelLoading(true, "Restoring model after OCR…")
+                        llama?.ensureSlot("chat_resume")
+                        notifyModelLoading(false, "Model ready")
+                    } catch (_: Exception) {}
+                }
             }
-            pdfResult
         }
         "stop_ocr" -> {
             try { llama?.stopOcr() } catch (_: Exception) {}
@@ -1110,8 +1149,15 @@ class MainActivity : Activity() {
         @JavascriptInterface
         fun call(id: Int, op: String, args: String) {
             thread {
-                try { reply(id, true, dispatch(op, JSONObject(args)).toString()) }
-                catch (e: Exception) { reply(id, false, e.message ?: e.javaClass.simpleName) }
+                try {
+                    reply(id, true, dispatch(op, JSONObject(args)).toString())
+                } catch (e: Throwable) {
+                    // Catch OutOfMemoryError and other Errors — Exception-only left the process dead
+                    Log.e("Kojot", "bridge op=$op", e)
+                    try {
+                        reply(id, false, e.message ?: e.javaClass.simpleName)
+                    } catch (_: Throwable) {}
+                }
             }
         }
     }
