@@ -322,6 +322,30 @@ class FileTools(rootDir: File, private val gates: List<String> = emptyList()) {
         return result("renamed ${rel(src)} → ${rel(dest)}", JSONObject().put("path", rel(dest)).put("from", rel(src)))
     }
 
+    // ---- shell / toybox (Approach A: Claude Code style) --------------------------------------
+    fun bash(a: JSONObject): JSONObject {
+        val cmd = a.optString("command").trim()
+        if (cmd.isEmpty()) throw ToolError("command is required")
+        return try {
+            val proc = ProcessBuilder("/system/bin/sh", "-c", cmd)
+                .directory(root)
+                .redirectErrorStream(true)
+                .start()
+            val finished = proc.waitFor(20, java.util.concurrent.TimeUnit.SECONDS)
+            if (!finished) {
+                proc.destroyForcibly()
+                return JSONObject().put("text", "Error: command timed out after 20s").put("exit_code", -1)
+            }
+            val output = proc.inputStream.bufferedReader().use { it.readText() }
+            val lines = output.lines()
+            val capped = if (lines.size > 200) lines.take(200).joinToString("\n") + "\n…[truncated: ${lines.size} lines total]" else output
+            val text = capped.take(8000)
+            JSONObject().put("text", if (text.isBlank()) "(no output, exit code ${proc.exitValue()})" else text).put("exit_code", proc.exitValue())
+        } catch (e: Exception) {
+            throw ToolError("bash execution failed: ${e.message}")
+        }
+    }
+
     fun run(op: String, a: JSONObject): JSONObject = when (op) {
         "list_dir" -> listDir(a)
         "find_files" -> find(a)
@@ -333,6 +357,7 @@ class FileTools(rootDir: File, private val gates: List<String> = emptyList()) {
         "rename" -> rename(a)
         "write_file" -> write(a)
         "edit_file" -> edit(a)
+        "bash" -> bash(a)
         else -> throw ToolError("unknown tool: $op")
     }
 }

@@ -914,6 +914,7 @@ ninfo();
 const P=(type,description,x={})=>({type,description,...x}),S=d=>P('string',d),Nn=d=>P('integer',d),B=d=>P('boolean',d),AR=d=>P('array',d,{items:{type:'string'}});
 const fn=(name,description,properties,required=[])=>({type:'function',function:{name,description,parameters:{type:'object',properties,required}}});
 const FT=[
+ fn('bash','Execute shell commands (toybox/POSIX sh) in the workspace root. Use for targeted inspection (grep, find, head, tail, cat, wc, sed, awk) to save tokens. Read-only commands run automatically; writes/deletes prompt user.',{command:S('Shell command to execute in workspace root')},['command']),
  fn('get_vitals','Check real-time device health diagnostics: battery level, battery temperature, thermal throttling state, free system RAM, Kojot memory footprint, and available storage.',{},[]),
  fn('list_dir','List files and folders in a directory.',{path:S('Folder relative to the workspace root. Default "."'),sort:P('string','name, size or date',{enum:['name','size','date']}),limit:Nn('Max entries (default 60)'),offset:Nn('Skip this many entries'),hidden:B('Include dot-files')}),
  fn('find_files','Find files or folders by name under a folder. * and ? wildcards work, e.g. "*.pdf".',{query:S('Name or wildcard pattern'),path:S('Folder to search. Default "."'),max:Nn('Max results (default 40)')},['query']),
@@ -1007,6 +1008,7 @@ async function webSearch(q,n){const s=cfg.search,p=PROV[s.prov];if(!q)throw Erro
 const arr=x=>[].concat(x==null?[]:x).filter(v=>v!==''),base=p=>String(p||'').replace(/\/+$/,'').split('/').pop()||'/';
 const items=x=>{const a=arr(x);return a.length===1?`"${base(a[0])}"`:`${a.length} items`};
 const TT={
+ bash:{i:'bulb',v:['Running','Ran','Run'],o:a=>`$ ${(a.command||'').slice(0,34)}`,s:a=>a.command||''},
  get_vitals:{i:'bulb',v:['Checking','Checked','Check'],o:()=>'device vitals',s:(a,k)=>k.data?`${k.data.battery_pct}% · ${k.data.temp_c}°C · ${k.data.avail_ram_mb}MB free RAM`:''},
 
  forge_tool:{i:'bulb',v:['Forging','Forged','Forge'],o:a=>`tool "${a.name||'custom'}"`,s:a=>`${a.name||''} · ${a.description||''}`},
@@ -1042,6 +1044,7 @@ const SI={run:'<i class="ring"></i>',prep:'<i class="ring"></i>',queued:'<i clas
 function bodyHTML(k){const a=k.args||{},d=k.data||{};let h='';
  if(k.name==='move'||k.name==='copy'){const mv=d.moves||arr(a.src).map(s=>({from:s,to:a.dst}));h=mv.map(m=>`<div class="pr"><em>from</em><span>${esc(m.from)}</span><em>to</em><span>${esc(m.to||a.dst||'')}</span>${m.ok===false?`<em></em><span class="bad">${esc(m.err||'failed')}</span>`:''}</div>`).join('');if(a.overwrite)h+='<div class="warn">Will overwrite existing files</div>'}
  else if(k.name==='delete'){h=arr(a.paths||a.path).map(p=>`<div class="ln">${ic('trash')}<span>${esc(p)}</span></div>`).join('')+(a.permanent?'<div class="warn">Permanent — this cannot be undone</div>':'<div class="note">Goes to .agent/trash/ — recoverable</div>')}
+ else if(k.name==='bash')h=`<div class="ln"><span>$ ${esc(a.command||'')}</span></div>`+(k.res?`<pre>${esc(k.res)}</pre>`:'');
  else if(k.name==='make_dir')h=arr(a.paths||a.path).map(p=>`<div class="ln">${ic('mkdir')}<span>${esc(p)}</span></div>`).join('');
  else if(d.entries){const L=d.entries.slice(0,40);h=`<div class="lst">${L.map(e=>`<div class="ln">${ic(e.d?'folder':'file')}<span>${esc(d.full?e.p:e.n)}${e.d?'/':''}</span>${e.d?'':`<i>${fmt(e.s)}</i>`}</div>`).join('')}</div>`+(d.entries.length>40||d.more?`<div class="note">+ more not shown here</div>`:'')}
  else if(d.results){h=(d.answer?`<div class="ans">${esc(d.answer)}</div>`:'')+d.results.map(r=>{let dm='';try{dm=new URL(r.u).hostname.replace(/^www\./,'')}catch{}return`<a class="sr" href="${ea(r.u)}" target="_blank" rel="noopener"><s>${esc((dm||'?')[0].toUpperCase())}</s><div><b>${esc(r.t||dm)}</b><small>${esc(dm)}</small><p>${esc(r.c||'')}</p></div></a>`}).join('')}
@@ -1180,6 +1183,7 @@ function condenseTool(k) {
   if (k.name === "delete") return "[Deleted: OK]";
   if (k.name === "save_fact") return "[Saved fact: OK]";
   if (k.name === "web_search") return "[Web search: " + (k.data?.results?.length || 0) + " results used]";
+  if (k.name === "bash") return "[bash `$ " + String(a.command || "").slice(0, 36) + "`: exit " + (k.data?.exit_code ?? 0) + "]";
   if (k.name === "get_vitals") return "[Vitals: " + (k.data?.battery_pct || "?") + "% battery]";
   if (k.name.startsWith("gh_")) return "[GitHub " + k.name + ": OK]";
   return String(k.res || "(done)").slice(0, 120);
@@ -1220,7 +1224,8 @@ function apiMsgs(c) {
         content: m.content || "",
         tool_calls: m.calls.map(k => ({ id: k.id, type: "function", function: { name: k.name, arguments: JSON.stringify(k.args || {}) } }))
       });
-      const isCurrentTurn = (m === lastAsst);
+      const userIdx = lastUser ? c.messages.indexOf(lastUser) : -1;
+      const isCurrentTurn = c.messages.indexOf(m) > userIdx;
       m.calls.forEach(k => {
         const payload = scrubJunk(isCurrentTurn ? (k.res || "(no result)") : condenseTool(k));
         out.push({ role: "tool", tool_call_id: k.id, content: payload });
@@ -1550,8 +1555,27 @@ async function runTool(k){
   Cap.setCached(k.name,k.args,out);
   return out;
 }
+/* ---- Claude Code Bash_Policy evaluator ---- */
+function evalBashPolicy(command){
+  const c=String(command||'').trim();
+  if(!c)return 'ask';
+  if(/[;&|`]/.test(c)){
+    const parts=c.split(/[;&|]+/).map(s=>s.trim()).filter(Boolean);
+    for(const p of parts){if(evalBashPolicy(p)==='ask')return 'ask';}
+  }
+  if(/>/.test(c))return 'ask';
+  const SAFE=/^(grep|egrep|fgrep|find|ls|cat|head|tail|wc|stat|file|diff|sort|uniq|cut|tr|du|df|which|date|uname|pwd)\b/;
+  return SAFE.test(c)?'allow':'ask';
+}
+function needsApproval(k){
+  if(!cfg.ask)return false;
+  if(Cap.isRemembered(k))return false;
+  if(k.name==='bash')return evalBashPolicy(k.args?.command)==='ask';
+  return ASK.has(k.name);
+}
+
 async function execCalls(a){const L=a.calls;
- for(const k of L){if(k.state==='err')continue;k.state=(cfg.ask&&ASK.has(k.name)&&!Cap.isRemembered(k))?'ask':'queued';if(k.state==='ask'){let r;const p=new Promise(x=>r=x);gate.set(k.id,{p,r})}}
+ for(const k of L){if(k.state==='err')continue;k.state=needsApproval(k)?'ask':'queued';if(k.state==='ask'){let r;const p=new Promise(x=>r=x);gate.set(k.id,{p,r})}}
  refresh(a);
  for(const k of L){
   if(k.state==='err')continue;
