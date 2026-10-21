@@ -75,7 +75,7 @@ class FileTools(rootDir: File, private val gates: List<String> = emptyList()) {
     fun listDir(a: JSONObject): JSONObject {
         val d = safe(a.optString("path", "."))
         if (!d.isDirectory) throw ToolError("not a directory: ${rel(d)}")
-        val limit = a.optInt("limit", 60).coerceIn(1, 200)
+        val limit = a.optInt("limit", 200).coerceIn(1, 5000)
         val off = a.optInt("offset", 0).coerceAtLeast(0)
         val hidden = a.optBoolean("hidden", false)
         val kids = (d.listFiles() ?: throw ToolError("cannot read ${rel(d)}")).filter { hidden || !it.name.startsWith(".") }

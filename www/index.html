@@ -574,6 +574,7 @@ textarea.in{height:auto;min-height:64px;padding:9px 12px;font:13px/19px var(--mo
   <button class="fbtn danger" id="fv-delete" disabled>Delete</button>
   <button class="fbtn" id="fv-embed" disabled title="Embed selected into memory">Embed</button>
   <button class="fbtn" id="fv-home">Root</button>
+  <input id="fv-filter" type="search" placeholder="Filter files…" autocomplete="off" spellcheck="false" style="height:32px;min-width:120px;flex:1;max-width:200px;padding:0 10px;border-radius:8px;border:1px solid var(--line);background:var(--bg-elevated);color:var(--fg);font-size:12px">
  </div>
  <div id="fv-status" style="font-size:11px;color:var(--fg-3);padding:4px 12px;border-bottom:1px solid var(--line)"></div>
  <div id="fv-list"></div>
@@ -582,9 +583,12 @@ textarea.in{height:auto;min-height:64px;padding:9px 12px;font:13px/19px var(--mo
  <div id="fv-header" style="flex:none">
   <button class="ib" id="fv-prev-back" aria-label="Back"><svg viewBox="0 0 24 24"><path d="M15 6l-6 6 6 6"/></svg></button>
   <div class="path" id="fv-prev-title">Preview</div>
+  <button class="fbtn" id="fv-prev-copy" style="margin-right:6px">Copy</button>
   <button class="ib" id="fv-prev-x" aria-label="Close"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
  </div>
- <pre id="fv-prev-body"></pre>
+ <div id="fv-prev-container" style="flex:1;overflow:auto;padding:12px">
+   <pre id="fv-prev-body"></pre>
+ </div>
 </div>
 <div class="fv-sheet" id="fv-sheet">
  <h4 id="fv-sheet-title">Actions</h4>
@@ -2075,63 +2079,34 @@ const PDF = {
   async ensureLibs(){
     if(this.libsReady && typeof pdfjsLib!=='undefined' && typeof PDFLib!=='undefined') return;
     const loadLocal = async (src)=>{
-      // Prefer same-origin vendor (bundled offline). Fall back to CDN.
-      const locals = ['./vendor/'+src, 'vendor/'+src, '/vendor/'+src];
+      // Offline only — no CDN fallbacks
+      const locals = ['./vendor/'+src, 'vendor/'+src];
       let last;
       for(const u of locals){
         try{ await this.loadScript(u); return; }catch(e){ last=e; }
       }
-      throw last || Error('local '+src);
+      throw Error('Vendor asset missing in www/vendor/'+src+(last?': '+last.message:''));
     };
     if(typeof pdfjsLib==='undefined'){
-      try{
-        await loadLocal('pdf.min.js');
-      }catch(_){
-        const cdns = [
-          'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js',
-          'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js'
-        ];
-        let last;
-        for(const u of cdns){ try{ await this.loadScript(u); last=null; break; }catch(e){ last=e; } }
-        if(last) throw Error('pdf.js failed to load (offline?). '+last.message);
-      }
+      await loadLocal('pdf.min.js');
       if(typeof pdfjsLib==='undefined') throw Error('pdf.js loaded but pdfjsLib global missing');
-      // worker: local first
-      const workers = ['./vendor/pdf.worker.min.js','vendor/pdf.worker.min.js','/vendor/pdf.worker.min.js',
-        'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js'];
+      const workers = ['./vendor/pdf.worker.min.js','vendor/pdf.worker.min.js'];
       pdfjsLib.GlobalWorkerOptions.workerSrc = workers[0];
-      // probe worker exists via fetch; if not, try next
       for(const w of workers){
         try{
-          const r = await fetch(w, {method:'HEAD'});
+          const r = await fetch(w, {method:'GET'});
           if(r.ok){ pdfjsLib.GlobalWorkerOptions.workerSrc = w; break; }
-        }catch(_){
-          try{
-            const r = await fetch(w, {method:'GET'});
-            if(r.ok){ pdfjsLib.GlobalWorkerOptions.workerSrc = w; break; }
-          }catch(__){}
-        }
+        }catch(_){}
       }
     }
     if(typeof PDFLib==='undefined'){
-      try{
-        await loadLocal('pdf-lib.min.js');
-      }catch(_){
-        const cdns = [
-          'https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js',
-          'https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/dist/pdf-lib.min.js'
-        ];
-        let last;
-        for(const u of cdns){ try{ await this.loadScript(u); last=null; break; }catch(e){ last=e; } }
-        if(last) throw Error('pdf-lib failed to load. '+last.message);
-      }
+      await loadLocal('pdf-lib.min.js');
       await new Promise(r=>setTimeout(r,30));
-      // Some builds expose differently; normalize
       if(typeof PDFLib==='undefined'){
-        const alt = window.pdfLib || window['pdf-lib'] || (window.PDFLibLib);
+        const alt = window.pdfLib || window['pdf-lib'] || window.PDFLibLib;
         if(alt) window.PDFLib = alt;
       }
-      if(typeof PDFLib==='undefined') throw Error('pdf-lib loaded but PDFLib is undefined (AMD conflict?)');
+      if(typeof PDFLib==='undefined') throw Error('Vendor asset missing or PDFLib undefined (www/vendor/pdf-lib.min.js)');
     }
     this.libsReady = true;
   },
@@ -3130,6 +3105,7 @@ theme();setBusy(false);render();
 (function(){
 let ed=null, edFile='untitled.html', edDirty=false, edWrap=true, edPath='.', edChainRunning=false;
 let edSteps=[''], edIdx=0, edBackup=null, edDecos=[], edManual=false, edHist=[], edHistN=0;
+let edAiAbortCtrl = null;
 const edBuzz=()=>{if(navigator.vibrate)navigator.vibrate(10)};
 function edToast(msg,kind,ms){kind=kind||'info';ms=ms||2200;const stack=$('#ed-toast');const el=document.createElement('div');el.className='t'+(kind==='error'?' err':kind==='ok'?' ok':'');el.textContent=msg;stack.appendChild(el);requestAnimationFrame(()=>el.classList.add('show'));setTimeout(()=>{el.classList.remove('show');setTimeout(()=>el.remove(),220)},ms)}
 function edLang(name){const e=(name.split('.').pop()||'').toLowerCase();const map={html:'html',htm:'html',js:'javascript',mjs:'javascript',cjs:'javascript',ts:'typescript',tsx:'typescript',css:'css',scss:'scss',json:'json',md:'markdown',markdown:'markdown',py:'python',yaml:'yaml',yml:'yaml',kt:'kotlin',kts:'kotlin',java:'java',go:'go',rs:'rust',c:'c',cpp:'cpp',h:'c',hpp:'cpp',xml:'xml',svg:'xml',sh:'shell'};try{const id=map[e]||'plaintext';if(typeof monaco!=='undefined'&&monaco.languages&&!monaco.languages.getLanguages().some(l=>l.id===id)&&id!=='plaintext')return 'plaintext';return id;}catch(_){return map[e]||'plaintext'}}
@@ -3509,7 +3485,14 @@ Rules: 1. search must be EXACT unique copy from buffer. 2. Empty buffer: search 
         json_schema: { name: "code_edit", strict: true, schema: editSchema }
       }
     };
-    const res=await fetch(base+'/v1/chat/completions',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    if(edAiAbortCtrl) try{ edAiAbortCtrl.abort(); }catch(_){}
+    edAiAbortCtrl = new AbortController();
+    const res=await fetch(base+'/v1/chat/completions',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      signal: edAiAbortCtrl.signal,
+      body:JSON.stringify(body)
+    });
     if(!res.ok)throw new Error(`HTTP ${res.status}: ${(await res.text()).slice(0,120)}`);
     const data=await res.json();
     if(data.error)throw new Error(typeof data.error==='string'?data.error:(data.error.message||'provider error'));
@@ -3548,10 +3531,17 @@ Rules: 1. search must be EXACT unique copy from buffer. 2. Empty buffer: search 
     $('#ed-g-confirm').disabled=false;$('#ed-g-retry').disabled=false;$('#ed-g-manual').disabled=false;
     $('#ed-g-confirm').textContent=edIdx===edSteps.length-1?'Finish Chain':'Confirm & Next';
   }catch(err){
+    if(err && (err.name==='AbortError' || /abort/i.test(String(err.message||'')))){
+      $('#ed-rstat').textContent='Aborted';
+      $('#ed-rstat').style.color='var(--fg-3)';
+      return;
+    }
     if(!heal){edExecuteStep({raw,error:err.message});return}
     $('#ed-rstat').textContent=`Failed: ${err.message.slice(0,40)}`;
     $('#ed-rstat').style.color='var(--ember)';
     $('#ed-g-retry').disabled=false;$('#ed-g-manual').disabled=false;
+  } finally {
+    edAiAbortCtrl = null;
   }
 }
 
@@ -3584,11 +3574,16 @@ $('#ed-g-manual')?.addEventListener('click',()=>{
 });
 $('#ed-g-abort')?.addEventListener('click',()=>{
   edBuzz();
-  if(!confirm('Abort remaining steps? Unconfirmed edit will be discarded.'))return;
+  if(edAiAbortCtrl){ try{ edAiAbortCtrl.abort(); }catch(_){} edAiAbortCtrl=null; }
   edClearHL();
   if(edBackup!==null)edUnlock(()=>ed.setValue(edBackup));
-  $('#ed-review').classList.remove('active');edChainRunning=false;edManual=false;edBackup=null;edLock(false);
+  $('#ed-review').classList.remove('active');
+  edChainRunning=false;
+  edManual=false;
+  edBackup=null;
+  edLock(false);
   $('#ed-g-manual').textContent='Manual Edit';
+  edToast('Step aborted','info');
 });
 })();
 
@@ -3741,7 +3736,7 @@ const Convert = {
         if(typeof mammoth!=='undefined'){ this.mammothReady=true; return true; }
       }catch(e){ lastErr=e; }
     }
-    throw Error('Mammoth offline bundle missing under www/vendor/. '+ (lastErr&&lastErr.message||''));
+    throw Error('Vendor asset missing in www/vendor/mammoth.browser.min.js'+(lastErr?': '+lastErr.message:''));
   },
   async ensurePdfLib(){
     if(typeof PDFLib!=='undefined') return;
@@ -3961,9 +3956,11 @@ const FV = {
     list.innerHTML='<div class="fv-empty">Loading…</div>';
     this.syncBar();
     try{
-      const r=JSON.parse(await nat('list_dir',{path:this.path||'.',limit:200,sort:this.sort,hidden:false}));
+      const r=JSON.parse(await nat('list_dir',{path:this.path||'.',limit:2000,sort:this.sort,hidden:false}));
       const entries=(r.data&&r.data.entries)||[];
       this.entries=entries;
+      const q=($('#fv-filter')?.value||'').trim().toLowerCase();
+      const shown=q?entries.filter(e=>(e.n||'').toLowerCase().includes(q)):entries;
       list.innerHTML='';
       if(this.path!=='.'&&this.path!==''){
         const up=document.createElement('div'); up.className='fv-row';
@@ -3971,8 +3968,8 @@ const FV = {
         up.onclick=()=>{const parts=this.path.split('/').filter(Boolean);parts.pop();this.path=parts.join('/')||'.';this.selected.clear();this.render()};
         list.appendChild(up);
       }
-      if(!entries.length){ list.innerHTML+='<div class="fv-empty">(empty folder)</div>'; this.syncBar(); return }
-      entries.forEach(e=>{
+      if(!shown.length){ list.innerHTML+='<div class="fv-empty">'+(q?'No matches':' (empty folder)')+'</div>'; this.syncBar(); return }
+      shown.forEach(e=>{
         const gated=this.isGated(e.p);
         const row=document.createElement('div');
         const on=this.selected.has(e.p);
@@ -4078,14 +4075,42 @@ const FV = {
       }catch(err){ alert(err.message||err); return; }
       if(a==='preview'){
         $('#fv-sheet').classList.remove('open');
+        const lower=(e.n||'').toLowerCase();
+        const title=$('#fv-prev-title');
+        const container=$('#fv-prev-container')||$('#fv-prev-body')?.parentElement;
+        if(title) title.textContent=e.n;
+        if(container) container.innerHTML='<div style="color:var(--fg-3)">Loading preview…</div>';
+        $('#fv-preview').classList.add('open');
+        let currentRawText='';
+        const copyBtn=$('#fv-prev-copy');
+        if(copyBtn) copyBtn.onclick=()=>{
+          if(!currentRawText)return;
+          navigator.clipboard.writeText(currentRawText).then(()=>{
+            copyBtn.textContent='Copied!';
+            setTimeout(()=>{copyBtn.textContent='Copy'},1500);
+          }).catch(()=>{});
+        };
         try{
+          if(/\.(png|jpe?g|webp|gif|svg)$/i.test(lower)){
+            const raw=await nat('read_file_b64',{path:e.p});
+            const j=JSON.parse(raw);
+            const b64=(j.data&&j.data.b64)||j.b64||'';
+            const mime=lower.endsWith('.svg')?'image/svg+xml':'image/'+(lower.endsWith('.jpg')?'jpeg':lower.split('.').pop());
+            if(container) container.innerHTML=`<div style="display:grid;place-items:center;min-height:100%"><img src="data:${mime};base64,${b64}" style="max-width:100%;max-height:80vh;border-radius:8px;object-fit:contain" alt=""></div>`;
+            currentRawText='[Image: '+e.p+']';
+            return;
+          }
           const raw=await nat('read_file',{path:e.p,full:true});
           const j=JSON.parse(raw);
-          $('#fv-prev-title').textContent=e.n;
-          const body=$('#fv-prev-body');
-          if(body){ body.style.whiteSpace='pre-wrap'; body.style.fontFamily='var(--mono)'; body.textContent=(j.text||'').slice(0,200000); }
-          $('#fv-preview').classList.add('open');
-        }catch(err){ alert(err.message||err) }
+          currentRawText=j.text||'';
+          if(/\.(md|markdown)$/i.test(lower)){
+            if(container) container.innerHTML=`<div class="md" style="max-width:768px;margin:0 auto">${md(currentRawText)}</div>`;
+          } else {
+            if(container) container.innerHTML=`<pre style="margin:0;font:12px/1.45 var(--mono);white-space:pre-wrap;word-break:break-word">${esc(currentRawText.slice(0,300000))}</pre>`;
+          }
+        }catch(err){
+          if(container) container.innerHTML=`<div style="color:var(--danger)">${esc(err.message||String(err))}</div>`;
+        }
         return;
       }
       if(a==='open-ed'){
@@ -4139,6 +4164,37 @@ $('#fv-back')?.addEventListener('click',()=>showFileViewer(false));
 $('#fv-x')?.addEventListener('click',()=>showFileViewer(false));
 $('#fv-refresh')?.addEventListener('click',()=>FV.render());
 $('#fv-home')?.addEventListener('click',()=>{FV.path='.';FV.selected.clear();FV.render()});
+$('#fv-filter')?.addEventListener('input',()=>{ try{ FV.renderFromCache?.() || FV.render(); }catch(_){ FV.render(); }});
+// Filter without re-fetch when entries already loaded
+FV.renderFromCache = function(){
+  const list=$('#fv-list'); if(!list||!this.entries) return this.render();
+  const q=($('#fv-filter')?.value||'').trim().toLowerCase();
+  const shown=q?this.entries.filter(e=>(e.n||'').toLowerCase().includes(q)):this.entries;
+  list.innerHTML='';
+  if(this.path!=='.'&&this.path!==''){
+    const up=document.createElement('div'); up.className='fv-row';
+    up.innerHTML='<div class="ico dir">⬆</div><div class="name">..</div><div class="meta"></div>';
+    up.onclick=()=>{const parts=this.path.split('/').filter(Boolean);parts.pop();this.path=parts.join('/')||'.';this.selected.clear();this.render()};
+    list.appendChild(up);
+  }
+  if(!shown.length){ list.innerHTML+='<div class="fv-empty">'+(q?'No matches':'(empty)')+'</div>'; this.syncBar(); return }
+  shown.forEach(e=>{
+    const gated=this.isGated(e.p);
+    const row=document.createElement('div');
+    const on=this.selected.has(e.p);
+    row.className='fv-row'+(gated?' gate-blocked':'')+(on?' sel':'');
+    const size=e.d?'':(e.s>=1048576?(e.s/1048576).toFixed(1)+' MB':e.s>=1024?Math.round(e.s/1024)+' KB':e.s+' B');
+    row.innerHTML=`<input type="checkbox" class="fv-check" ${on?'checked':''} style="margin-right:8px;flex:none">
+      <div class="ico ${e.d?'dir':''}">${e.d?'📁':'📄'}</div>
+      <div class="name">${esc(e.n)}</div>
+      <div class="meta">${size||(e.m||'')}</div>`;
+    const check=row.querySelector('.fv-check');
+    check.onclick=(ev)=>{ev.stopPropagation(); if(check.checked)this.selected.add(e.p);else this.selected.delete(e.p); row.classList.toggle('sel',check.checked); this.syncBar()};
+    row.onclick=(ev)=>{ if(ev.target===check)return; if(e.d){ this.path=e.p; this.selected.clear(); this.render(); } else this.openSheet(e); };
+    list.appendChild(row);
+  });
+  this.syncBar();
+};
 $('#fv-sort')?.addEventListener('click',()=>{
   FV.sort=FV.sort==='name'?'size':FV.sort==='size'?'date':'name';
   $('#fv-sort').textContent='Sort: '+FV.sort;

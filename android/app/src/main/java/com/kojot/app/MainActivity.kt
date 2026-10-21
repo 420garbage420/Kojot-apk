@@ -182,8 +182,9 @@ class MainActivity : Activity() {
             // UI is loaded from filesDir; chat API is still http://127.0.0.1:8080
             @Suppress("DEPRECATION")
             settings.allowFileAccessFromFileURLs = true
+            // No universal file URL access (sandbox). Mixed content kept for localhost model API.
             @Suppress("DEPRECATION")
-            settings.allowUniversalAccessFromFileURLs = true
+            settings.allowUniversalAccessFromFileURLs = false
             settings.mixedContentMode = android.webkit.WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
             setBackgroundColor(0xFF202020.toInt()); visibility = View.GONE
             webViewClient = object : WebViewClient() {
