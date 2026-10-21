@@ -197,7 +197,7 @@ textarea.in{height:auto;min-height:64px;padding:9px 12px;font:13px/19px var(--mo
 #pdf-page-lbl{font-family:var(--mono);font-size:11px;color:var(--fg-3);padding:0 6px;flex-shrink:0}
 #pdf-body{flex:1;min-height:0;position:relative;display:flex;flex-direction:column}
 #pdf-canvas-wrap{flex:1;min-height:0;overflow:auto;background:#0c0c0c;-webkit-overflow-scrolling:touch;touch-action:pan-x pan-y}
-#pdf-pages{display:flex;flex-direction:column;align-items:center;padding:10px 8px 88px;gap:10px;min-height:100%;transform-origin:top center;transition:transform .08s ease-out}
+#pdf-pages{display:flex;flex-direction:column;align-items:center;padding:10px 8px 88px;gap:10px;min-height:100%}
 #pdf-pages canvas{width:100%;max-width:720px;height:auto;box-shadow:0 2px 16px rgba(0,0,0,.55);background:#fff;border-radius:2px}
 #pdf-empty{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;padding:40px 24px;color:var(--fg-3);text-align:center;min-height:50vh}
 #pdf-empty b{color:var(--fg);font-size:15px}
@@ -308,8 +308,7 @@ textarea.in{height:auto;min-height:64px;padding:9px 12px;font:13px/19px var(--mo
 #fv-header{height:48px;padding:0 8px;display:flex;align-items:center;gap:6px;background:var(--bg-sidebar);border-bottom:1px solid var(--line);flex:none}
 #fv-header .path{flex:1;min-width:0;font-size:13px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--fg)}
 #fv-toolbar{display:flex;gap:4px;padding:6px 10px;border-bottom:1px solid var(--line);background:var(--bg-subtle);flex:none;overflow-x:auto}
-.fbtn{height:32px;padding:0 12px;border-radius:8px;font-size:12px;font-weight:500;color:var(--fg-2);border:1px solid var(--line);background:var(--bg-elevated);white-space:nowrap;cursor:pointer}
-.fbtn:active{background:var(--bg-hover)}
+#fv-toolbar .fbtn{height:32px;padding:0 12px;border-radius:8px;font-size:12px;font-weight:500;color:var(--fg-2);border:1px solid var(--line);background:var(--bg-elevated);white-space:nowrap}
 #fv-toolbar .fbtn:active{background:var(--bg-hover)}
 #fv-toolbar .fbtn.danger{color:var(--danger)}
 #fv-list{flex:1;overflow-y:auto;padding:6px 8px;padding-bottom:calc(12px + env(safe-area-inset-bottom))}
@@ -436,9 +435,7 @@ textarea.in{height:auto;min-height:64px;padding:9px 12px;font:13px/19px var(--mo
  <div id="pdf-header">
   <button class="ib" id="pdf-back" aria-label="Back"><svg viewBox="0 0 24 24"><path d="M15 6l-6 6 6 6"/></svg></button>
   <div class="file-pill" id="pdf-title">No PDF open</div>
-  <button class="ib" id="pdf-zoom-out" style="width:30px;height:30px;font-size:16px;font-weight:700" title="Zoom out">−</button>
-  <span id="pdf-page-lbl" style="min-width:44px;text-align:center">—</span>
-  <button class="ib" id="pdf-zoom-in" style="width:30px;height:30px;font-size:16px;font-weight:700" title="Zoom in">+</button>
+  <span id="pdf-page-lbl">—</span>
   <button class="ib" id="pdf-fields-toggle" aria-label="Fields" title="Form fields"><svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h10M4 18h14"/></svg></button>
   <button class="ib" id="pdf-x" aria-label="Close"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
  </div>
@@ -446,7 +443,7 @@ textarea.in{height:auto;min-height:64px;padding:9px 12px;font:13px/19px var(--mo
   <div id="pdf-canvas-wrap">
    <div id="pdf-empty">
     <b>PDF workspace</b>
-    <div class="hint">Open any PDF — forms, scans, or photos. Gemma visually inspects documents directly. Tools live in the bar below.</div>
+    <div class="hint">Open any PDF — fillable forms, flat scans, or photos. OCR works without form fields. Tools live in the bar below.</div>
     <button class="btn sm go" id="pdf-empty-open" style="margin-top:4px">Open PDF</button>
    </div>
    <div id="pdf-pages" style="display:none"></div>
@@ -455,7 +452,7 @@ textarea.in{height:auto;min-height:64px;padding:9px 12px;font:13px/19px var(--mo
   <div id="pdf-dock">
    <div class="bar">
     <button class="pbtn" id="pdf-btn-open"><svg viewBox="0 0 24 24"><path d="M3 7a1 1 0 011-1h4.5l1.5 2H20a1 1 0 011 1v9a1 1 0 01-1 1H4a1 1 0 01-1-1V7z"/></svg>Open</button>
-    <button class="pbtn" id="pdf-btn-ocr" disabled><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="6"/><path d="M20 20l-3.5-3.5"/><path d="M9 11h4M11 9v4"/></svg>Inspect</button>
+    <button class="pbtn" id="pdf-btn-ocr" disabled><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="6"/><path d="M20 20l-3.5-3.5"/><path d="M9 11h4M11 9v4"/></svg>OCR</button>
     <button class="pbtn ai" id="pdf-btn-ai" disabled><svg viewBox="0 0 24 24"><path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8L12 3z"/></svg>AI Fill</button>
     <button class="pbtn" id="pdf-btn-fields" disabled><svg viewBox="0 0 24 24"><path d="M9 5h11M9 12h11M9 19h11M5 5v.01M5 12v.01M5 19v.01"/></svg>Fields</button>
     <button class="pbtn" id="pdf-btn-sig" disabled><svg viewBox="0 0 24 24"><path d="M3 17c3-1 5 2 8 0s5-1 8 1"/><path d="M4 21h16"/></svg>Sign</button>
@@ -552,21 +549,8 @@ textarea.in{height:auto;min-height:64px;padding:9px 12px;font:13px/19px var(--mo
  </div>
 </div>
 <div id="ed-fbrowser">
- <div class="fb-h">
-  <button class="ib" id="ed-fb-up" aria-label="Up"><svg viewBox="0 0 24 24"><path d="M15 6l-6 6 6 6"/></svg></button>
-  <div id="ed-fb-path" style="flex:1;font-family:var(--mono);font-size:13px;overflow:hidden;text-overflow:ellipsis;font-weight:500;color:var(--fg)">.</div>
-  <button class="ib" id="ed-fb-x" aria-label="Close"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
- </div>
- <div id="ed-fb-crumbs" style="display:flex;flex-wrap:wrap;gap:4px;padding:6px 10px;border-bottom:1px solid var(--line);font-size:12px;background:var(--bg-subtle)"></div>
- <div id="ed-fb-toolbar" style="display:flex;gap:6px;padding:6px 10px;border-bottom:1px solid var(--line);background:var(--bg-subtle);flex:none;overflow-x:auto;align-items:center">
-  <button class="fbtn" id="ed-fb-new-file">+ File</button>
-  <button class="fbtn" id="ed-fb-mkdir">+ Folder</button>
-  <button class="fbtn" id="ed-fb-sort">Sort: name</button>
-  <button class="fbtn" id="ed-fb-refresh">Refresh</button>
-  <input id="ed-fb-filter" type="search" placeholder="Filter files…" autocomplete="off" spellcheck="false" style="height:32px;min-width:110px;flex:1;max-width:200px;padding:0 10px;border-radius:8px;border:1px solid var(--line);background:var(--bg-elevated);color:var(--fg);font-size:12px">
- </div>
- <div id="ed-fb-status" style="font-size:11px;color:var(--fg-3);padding:4px 12px;border-bottom:1px solid var(--line)"></div>
- <div class="fb-list" id="ed-fb-list" style="flex:1;overflow-y:auto;padding:6px 8px"></div>
+ <div class="fb-h"><button class="ib" id="ed-fb-up"><svg viewBox="0 0 24 24"><path d="M15 6l-6 6 6 6"/></svg></button><span id="ed-fb-path" style="flex:1;font-family:var(--mono);font-size:13px;overflow:hidden;text-overflow:ellipsis">.</span><button class="ib" id="ed-fb-x"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>
+ <div class="fb-list" id="ed-fb-list"></div>
 </div>
 <div id="ed-toast"></div>
 
@@ -621,18 +605,6 @@ textarea.in{height:auto;min-height:64px;padding:9px 12px;font:13px/19px var(--mo
  <div class="sh-f"><button class="btn p" id="s-ok">Done</button></div>
 </div></div>
 <script>
-
-/* Crisp Voxel Symbols for Kojot */
-const VOXEL = {
-  llm: `<svg viewBox="0 0 16 16" width="16" height="16" style="shape-rendering:crispEdges;display:inline-block;vertical-align:-2px"><rect x="3" y="2" width="10" height="2" fill="#fbbf24"/><rect x="2" y="4" width="12" height="6" fill="#f59e0b"/><rect x="4" y="6" width="2" height="2" fill="#171717"/><rect x="7" y="6" width="2" height="2" fill="#171717"/><rect x="10" y="6" width="2" height="2" fill="#171717"/><rect x="3" y="10" width="10" height="2" fill="#d97706"/><rect x="4" y="12" width="3" height="2" fill="#d97706"/><rect x="4" y="14" width="2" height="1" fill="#b45309"/></svg>`,
-  coder: `<svg viewBox="0 0 16 16" width="16" height="16" style="shape-rendering:crispEdges;display:inline-block;vertical-align:-2px"><rect x="1" y="2" width="14" height="12" rx="1" fill="#142429"/><rect x="3" y="4" width="2" height="2" fill="#5eead4"/><rect x="2" y="6" width="2" height="3" fill="#5eead4"/><rect x="3" y="9" width="2" height="2" fill="#5eead4"/><rect x="8" y="4" width="2" height="2" fill="#2dd4bf"/><rect x="7" y="6" width="2" height="3" fill="#2dd4bf"/><rect x="6" y="9" width="2" height="2" fill="#2dd4bf"/><rect x="11" y="4" width="2" height="2" fill="#5eead4"/><rect x="12" y="6" width="2" height="3" fill="#5eead4"/><rect x="11" y="9" width="2" height="2" fill="#5eead4"/></svg>`,
-  embed: `<svg viewBox="0 0 16 16" width="16" height="16" style="shape-rendering:crispEdges;display:inline-block;vertical-align:-2px"><polygon points="8,1 14,4 8,7 2,4" fill="#c4b5fd"/><polygon points="2,4 8,7 8,15 2,12" fill="#8b5cf6"/><polygon points="8,7 14,4 14,12 8,15" fill="#6d28d9"/><polygon points="6,9 8,10 8,12 6,11" fill="#a78bfa"/></svg>`,
-  image: `<svg viewBox="0 0 16 16" width="16" height="16" style="shape-rendering:crispEdges;display:inline-block;vertical-align:-2px"><rect x="4" y="2" width="4" height="2" fill="#10b981"/><rect x="2" y="4" width="12" height="9" fill="#059669"/><rect x="1" y="5" width="1" height="7" fill="#047857"/><rect x="14" y="5" width="1" height="7" fill="#047857"/><rect x="5" y="6" width="6" height="5" fill="#0f172a"/><rect x="6" y="7" width="4" height="3" fill="#34d399"/><rect x="7" y="8" width="2" height="2" fill="#022c22"/><rect x="6" y="7" width="1" height="1" fill="#ffffff"/></svg>`,
-  root: `<svg viewBox="0 0 16 16" width="16" height="16" style="shape-rendering:crispEdges;display:inline-block;vertical-align:-2px"><rect x="2" y="3" width="5" height="2" fill="#94a3b8"/><rect x="2" y="5" width="12" height="2" fill="#64748b"/><rect x="2" y="7" width="12" height="7" fill="#475569"/><rect x="3" y="8" width="10" height="1" fill="#64748b"/></svg>`,
-  folder: `<svg viewBox="0 0 16 16" width="15" height="15" style="shape-rendering:crispEdges;display:inline-block;vertical-align:-2px"><rect x="2" y="3" width="5" height="2" fill="#fbbf24"/><rect x="2" y="5" width="12" height="8" fill="#f59e0b"/><rect x="2" y="7" width="12" height="6" fill="#d97706"/></svg>`,
-  file: `<svg viewBox="0 0 16 16" width="15" height="15" style="shape-rendering:crispEdges;display:inline-block;vertical-align:-2px"><rect x="3" y="1" width="7" height="14" fill="#cbd5e1"/><polygon points="10,1 13,4 10,4" fill="#94a3b8"/><rect x="10" y="4" width="3" height="11" fill="#cbd5e1"/><rect x="5" y="5" width="4" height="1" fill="#64748b"/><rect x="5" y="8" width="6" height="1" fill="#64748b"/><rect x="5" y="11" width="5" height="1" fill="#64748b"/></svg>`
-};
-
 const $=s=>document.querySelector(s),LS=localStorage,J=JSON;
 const DEF={url:'http://127.0.0.1:8080',sys:'You are a helpful, concise assistant.',t:.7,m:1024,theme:'auto',power:false,thoughts:true,vision:false,coder_t:0.1,p_coder:{},srv_coder:{},xj_coder:'',files:true,ask:true,github:{token:'',repo:'420garbage420/kojot'},search:{on:true,prov:'tavily',keys:{},max:5,depth:'basic',sx:'',cu:'',cm:'GET',ch:'',cb:''},p:{},srv:{},xj:'',project:{name:'',conventions:''},profile:'balanced',auto_coder:false,tool_cache:true,mem_auto:true,file_gates:[],ocr_engine:'mlkit',ocr_path:'',ext_models:{}};
 const saved=(()=>{try{return J.parse(LS.getItem('lc.cfg')||'{}')}catch{return{}}})();
@@ -942,7 +914,6 @@ ninfo();
 const P=(type,description,x={})=>({type,description,...x}),S=d=>P('string',d),Nn=d=>P('integer',d),B=d=>P('boolean',d),AR=d=>P('array',d,{items:{type:'string'}});
 const fn=(name,description,properties,required=[])=>({type:'function',function:{name,description,parameters:{type:'object',properties,required}}});
 const FT=[
- fn('bash','Execute shell commands (toybox/POSIX sh) in the workspace root. Use for targeted inspection (grep, find, head, tail, cat, wc, sed, awk) to save tokens. Read-only commands run automatically; writes/deletes prompt user.',{command:S('Shell command to execute in workspace root')},['command']),
  fn('get_vitals','Check real-time device health diagnostics: battery level, battery temperature, thermal throttling state, free system RAM, Kojot memory footprint, and available storage.',{},[]),
  fn('list_dir','List files and folders in a directory.',{path:S('Folder relative to the workspace root. Default "."'),sort:P('string','name, size or date',{enum:['name','size','date']}),limit:Nn('Max entries (default 60)'),offset:Nn('Skip this many entries'),hidden:B('Include dot-files')}),
  fn('find_files','Find files or folders by name under a folder. * and ? wildcards work, e.g. "*.pdf".',{query:S('Name or wildcard pattern'),path:S('Folder to search. Default "."'),max:Nn('Max results (default 40)')},['query']),
@@ -1036,7 +1007,6 @@ async function webSearch(q,n){const s=cfg.search,p=PROV[s.prov];if(!q)throw Erro
 const arr=x=>[].concat(x==null?[]:x).filter(v=>v!==''),base=p=>String(p||'').replace(/\/+$/,'').split('/').pop()||'/';
 const items=x=>{const a=arr(x);return a.length===1?`"${base(a[0])}"`:`${a.length} items`};
 const TT={
- bash:{i:'bulb',v:['Running','Ran','Run'],o:a=>`$ ${(a.command||'').slice(0,34)}`,s:a=>a.command||''},
  get_vitals:{i:'bulb',v:['Checking','Checked','Check'],o:()=>'device vitals',s:(a,k)=>k.data?`${k.data.battery_pct}% · ${k.data.temp_c}°C · ${k.data.avail_ram_mb}MB free RAM`:''},
 
  forge_tool:{i:'bulb',v:['Forging','Forged','Forge'],o:a=>`tool "${a.name||'custom'}"`,s:a=>`${a.name||''} · ${a.description||''}`},
@@ -1072,7 +1042,6 @@ const SI={run:'<i class="ring"></i>',prep:'<i class="ring"></i>',queued:'<i clas
 function bodyHTML(k){const a=k.args||{},d=k.data||{};let h='';
  if(k.name==='move'||k.name==='copy'){const mv=d.moves||arr(a.src).map(s=>({from:s,to:a.dst}));h=mv.map(m=>`<div class="pr"><em>from</em><span>${esc(m.from)}</span><em>to</em><span>${esc(m.to||a.dst||'')}</span>${m.ok===false?`<em></em><span class="bad">${esc(m.err||'failed')}</span>`:''}</div>`).join('');if(a.overwrite)h+='<div class="warn">Will overwrite existing files</div>'}
  else if(k.name==='delete'){h=arr(a.paths||a.path).map(p=>`<div class="ln">${ic('trash')}<span>${esc(p)}</span></div>`).join('')+(a.permanent?'<div class="warn">Permanent — this cannot be undone</div>':'<div class="note">Goes to .agent/trash/ — recoverable</div>')}
- else if(k.name==='bash')h=`<div class="ln"><span>$ ${esc(a.command||'')}</span></div>`+(k.res?`<pre>${esc(k.res)}</pre>`:'');
  else if(k.name==='make_dir')h=arr(a.paths||a.path).map(p=>`<div class="ln">${ic('mkdir')}<span>${esc(p)}</span></div>`).join('');
  else if(d.entries){const L=d.entries.slice(0,40);h=`<div class="lst">${L.map(e=>`<div class="ln">${ic(e.d?'folder':'file')}<span>${esc(d.full?e.p:e.n)}${e.d?'/':''}</span>${e.d?'':`<i>${fmt(e.s)}</i>`}</div>`).join('')}</div>`+(d.entries.length>40||d.more?`<div class="note">+ more not shown here</div>`:'')}
  else if(d.results){h=(d.answer?`<div class="ans">${esc(d.answer)}</div>`:'')+d.results.map(r=>{let dm='';try{dm=new URL(r.u).hostname.replace(/^www\./,'')}catch{}return`<a class="sr" href="${ea(r.u)}" target="_blank" rel="noopener"><s>${esc((dm||'?')[0].toUpperCase())}</s><div><b>${esc(r.t||dm)}</b><small>${esc(dm)}</small><p>${esc(r.c||'')}</p></div></a>`}).join('')}
@@ -1211,7 +1180,6 @@ function condenseTool(k) {
   if (k.name === "delete") return "[Deleted: OK]";
   if (k.name === "save_fact") return "[Saved fact: OK]";
   if (k.name === "web_search") return "[Web search: " + (k.data?.results?.length || 0) + " results used]";
-  if (k.name === "bash") return "[bash `$ " + String(a.command || "").slice(0, 36) + "`: exit " + (k.data?.exit_code ?? 0) + "]";
   if (k.name === "get_vitals") return "[Vitals: " + (k.data?.battery_pct || "?") + "% battery]";
   if (k.name.startsWith("gh_")) return "[GitHub " + k.name + ": OK]";
   return String(k.res || "(done)").slice(0, 120);
@@ -1252,8 +1220,7 @@ function apiMsgs(c) {
         content: m.content || "",
         tool_calls: m.calls.map(k => ({ id: k.id, type: "function", function: { name: k.name, arguments: JSON.stringify(k.args || {}) } }))
       });
-      const userIdx = lastUser ? c.messages.indexOf(lastUser) : -1;
-      const isCurrentTurn = c.messages.indexOf(m) > userIdx;
+      const isCurrentTurn = (m === lastAsst);
       m.calls.forEach(k => {
         const payload = scrubJunk(isCurrentTurn ? (k.res || "(no result)") : condenseTool(k));
         out.push({ role: "tool", tool_call_id: k.id, content: payload });
@@ -1583,27 +1550,8 @@ async function runTool(k){
   Cap.setCached(k.name,k.args,out);
   return out;
 }
-/* ---- Claude Code Bash_Policy evaluator ---- */
-function evalBashPolicy(command){
-  const c=String(command||'').trim();
-  if(!c)return 'ask';
-  if(/[;&|`]/.test(c)){
-    const parts=c.split(/[;&|]+/).map(s=>s.trim()).filter(Boolean);
-    for(const p of parts){if(evalBashPolicy(p)==='ask')return 'ask';}
-  }
-  if(/>/.test(c))return 'ask';
-  const SAFE=/^(grep|egrep|fgrep|find|ls|cat|head|tail|wc|stat|file|diff|sort|uniq|cut|tr|du|df|which|date|uname|pwd)\b/;
-  return SAFE.test(c)?'allow':'ask';
-}
-function needsApproval(k){
-  if(!cfg.ask)return false;
-  if(Cap.isRemembered(k))return false;
-  if(k.name==='bash')return evalBashPolicy(k.args?.command)==='ask';
-  return ASK.has(k.name);
-}
-
 async function execCalls(a){const L=a.calls;
- for(const k of L){if(k.state==='err')continue;k.state=needsApproval(k)?'ask':'queued';if(k.state==='ask'){let r;const p=new Promise(x=>r=x);gate.set(k.id,{p,r})}}
+ for(const k of L){if(k.state==='err')continue;k.state=(cfg.ask&&ASK.has(k.name)&&!Cap.isRemembered(k))?'ask':'queued';if(k.state==='ask'){let r;const p=new Promise(x=>r=x);gate.set(k.id,{p,r})}}
  refresh(a);
  for(const k of L){
   if(k.state==='err')continue;
@@ -1839,14 +1787,14 @@ function paneTools(){return`<div class="pane" data-p="tool"><div class="sec">Pho
  <div class="tst" id="vit-m" style="white-space:pre-wrap;font-family:var(--mono);font-size:12px;margin-top:6px"></div>
 
  <div class="sec">Models folder (no copy)</div>
- <div class="note" style="margin:0 0 8px">One GGUF on disk — <b>no duplicate copies</b>. Models are grouped by folder: <code>llm/</code> (Chat & Multimodal Vision), <code>coder/</code> (Monaco Editor), and <code>embed/</code> (Edge Memory).</div>
+ <div class="note" style="margin:0 0 8px">One GGUF on disk — <b>no second copy</b>. Default: <code>Download/Local Models</code> with subfolders <code>llm</code>, <code>embed</code>, <code>coder</code>, <code>image</code>, <code>ocr</code>, <code>decision</code>. OCR is optional: bind a GGUF to the <b>OCR</b> slot if you have a vision/OCR model; otherwise AI Fill falls back to on-device <b>ML Kit</b>.</div>
  <div class="fi"><label>Models folder path</label>
   <div class="r2"><input class="in" id="models-dir-in" autocapitalize="off" spellcheck="false" placeholder="/sdcard/Download/Local Models"><button class="btn sm" id="models-dir-set" style="margin:0">Set</button></div>
  </div>
  <div class="tst" id="models-dir-m"></div>
- <div id="models-list" style="max-height:380px;overflow-y:auto;font-size:13px;margin:8px 0;padding:6px;background:var(--bg-well);border-radius:12px;border:1px solid var(--line)"></div>
+ <div id="models-list" style="max-height:160px;overflow-y:auto;font-size:13px;margin:8px 0;padding:6px;background:var(--bg-well);border-radius:10px"></div>
  <div class="r2" style="flex-wrap:wrap;gap:6px">
-  <button class="btn sm" id="models-refresh">Refresh folder list</button>
+  <button class="btn sm" id="models-refresh">Refresh list</button>
   <button class="btn sm" id="main-pick">Pick file…</button>
  </div>
 
@@ -1911,7 +1859,11 @@ function paneTools(){return`<div class="pane" data-p="tool"><div class="sec">Pho
  </div>
  <div class="tst" id="ext-m-msg"></div>
 
-
+ <div class="sec">OCR engine</div>
+ <div class="note" style="margin:0 0 8px">Default is on-device <b>ML Kit</b>. Put a vision GGUF in <code>Local Models/ocr/</code> and press the <b>OCR</b> button on its card (folder alone does not bind). Place a matching <code>*mmproj*.gguf</code> beside it for the vision runner on :8082. Runner starts <b>only on first OCR</b> (not at launch). Opening the code editor stops it. Without mmproj → ML Kit only.</div>
+ <div class="set"><div class="lt"><span id="ocr-st">OCR path (optional)</span><small id="ocr-s">not set · using ML Kit</small></div></div>
+ <div class="r2" style="margin:4px 0 0"><button class="btn sm dng" id="ocr-del" style="display:none">Unbind OCR</button></div>
+ <div class="tst" id="ocr-m"></div>
 
  <div class="sec">GitHub Integration</div>
  <div class="fi"><label>Personal Access Token (classic with repo scope)</label><input class="in" type="password" data-k="github.token" data-t="str" placeholder="ghp_..."></div>
@@ -2314,7 +2266,7 @@ const PDF = {
 
   fieldsHTML(){
     if(!this.fields.length)
-      return '<div class="note" style="padding:16px;color:var(--fg-3);line-height:1.45"><b>No AcroForm fields</b> — this is normal for scans and flat PDFs. Use <b>Text</b>/<b>Sign</b> to place entries manually, or <b>AI Fill</b> to let Gemma visually place them for you.</div>';
+      return '<div class="note" style="padding:16px;color:var(--fg-3);line-height:1.45"><b>No AcroForm fields</b> — this is normal for scans and flat PDFs. Use <b>OCR</b> to read text, <b>Text</b>/<b>Sign</b> to write on the page, or <b>AI Fill</b> (OCR layout → stamp). Form-field fill only applies when the PDF was built with fillable fields.</div>';
     return this.fields.map((f,i)=>{
       if(f.checked!==null){
         return `<div class="pdf-field"><label><input type="checkbox" data-fi="${i}" ${f.checked?'checked':''}> ${esc(f.name)}</label></div>`;
@@ -2386,29 +2338,6 @@ const PDF = {
     return path;
   },
 
-  zoom: 1.0,
-  setZoom(z){
-    this.zoom = Math.min(Math.max(z, 0.7), 3.0);
-    const wrap = $('#pdf-pages');
-    if(!wrap) return;
-    wrap.style.transform = `scale(${this.zoom})`;
-    $('#pdf-page-lbl').textContent = Math.round(this.zoom * 100) + '%';
-    clearTimeout(this._zlbl);
-    this._zlbl = setTimeout(()=>{
-      if(this.doc) $('#pdf-page-lbl').textContent = this.page + ' / ' + this.doc.numPages;
-    }, 1200);
-  },
-
-  async reloadViewer(){
-    if(!this.libDoc) return;
-    try {
-      const saved = await this.libDoc.save({updateFieldAppearances:true});
-      this.bytes = new Uint8Array(saved);
-      this.doc = await pdfjsLib.getDocument({data: this.bytes.slice()}).promise;
-      await this.renderPages();
-    } catch(e) { console.warn('reloadViewer error', e); }
-  },
-
   async stampSignature(dataUrl, pageIndex, pdfX, pdfY){
     if(!this.libDoc) throw Error('No PDF loaded');
     const png = await fetch(dataUrl).then(r=>r.arrayBuffer());
@@ -2416,15 +2345,15 @@ const PDF = {
     const pages = this.libDoc.getPages();
     const page = pages[Math.max(0, Math.min(pages.length-1, (pageIndex|0)))];
     const w=140, h=48;
-    // Center signature over the tap point
-    const x = pdfX!=null ? Math.max(10, pdfX - (w/2)) : 54;
-    const y = pdfY!=null ? Math.max(10, pdfY - (h/2)) : 54;
+    const size = page.getSize();
+    const x = pdfX!=null ? pdfX : 54;
+    const y = pdfY!=null ? pdfY : 54;
     page.drawImage(img,{x, y, width:w, height:h});
     this.dirty=true;
-    await this.reloadViewer();
+    // refresh viewer preview from libDoc bytes would need save — mark dirty for user
   },
 
-  /** Draw free text on any PDF and immediately re-render view. */
+  /** Draw free text on any PDF (AcroForm not required). PDF coords: origin bottom-left. */
   async stampText(str, pageIndex, pdfX, pdfY, size){
     if(!this.libDoc) throw Error('No PDF loaded');
     str = String(str||'').trim();
@@ -2437,7 +2366,6 @@ const PDF = {
     const y = pdfY!=null ? pdfY : 72;
     page.drawText(str, { x, y, size: fontSize, font, color: PDFLib.rgb(0.1,0.1,0.1) });
     this.dirty = true;
-    await this.reloadViewer();
   },
 
   placeMode: null, // {kind:'text'|'sign', text?:string}
@@ -2476,10 +2404,10 @@ const PDF = {
 
   showAiSheet(){
     const nFields = (this.fields||[]).length;
-    const html = `<p style="font-size:12px;color:var(--fg-3);margin:0 0 10px;line-height:1.4">Uses your <b>multimodal model</b> on-device. <b>Fillable PDFs</b> → filled directly. <b>Scans & photos</b> → Gemma visually inspects the page layout and stamps text with precision.</p>
+    const html = `<p style="font-size:12px;color:var(--fg-3);margin:0 0 10px;line-height:1.4">Uses your <b>main chat model</b> on-device. <b>Fillable</b> PDFs → form fields. <b>Scans / flat PDFs</b> → OCR (optional GGUF path if bound, otherwise <b>ML Kit</b>) for layout + table reconstruction, then the model stamps text. OCR GGUF is optional.</p>
 <textarea id="pdf-ai-in" placeholder="e.g. Name Jane Doe, SSN 123-45-6789, date today, check Agree" style="width:100%;min-height:88px;background:var(--bg);border:1px solid var(--line);color:var(--fg);font-size:14px;padding:10px 12px;border-radius:10px;resize:vertical"></textarea>
-<button type="button" id="pdf-ai-run" style="width:100%;margin-top:10px;padding:12px;border-radius:12px;border:0;background:var(--accent);color:var(--on-accent);font-weight:600;font-size:14px;cursor:pointer">${nFields?'Fill form fields':'Visual AI Fill (Gemma Vision)'}</button>
-<div id="pdf-ai-status" style="font-size:11px;color:var(--fg-3);margin-top:8px;font-family:var(--mono)">${nFields? nFields+' AcroForm fields':'No form fields — Gemma will visually inspect the page and place text stamps'}</div>`;
+<button type="button" id="pdf-ai-run" style="width:100%;margin-top:10px;padding:12px;border-radius:12px;border:0;background:var(--accent);color:var(--on-accent);font-weight:600;font-size:14px;cursor:pointer">${nFields?'Fill form fields':'OCR + AI stamp (non-form)'}</button>
+<div id="pdf-ai-status" style="font-size:11px;color:var(--fg-3);margin-top:8px;font-family:var(--mono)">${nFields? nFields+' AcroForm fields':'No form fields — will OCR pages then place stamps'}</div>`;
     this.openSheet('AI Fill', html);
   },
   async runAiFillFromUi(){
@@ -2548,83 +2476,69 @@ const PDF = {
       this.dirty=true;
       return n;
     }
-    // Path B: Flat / Scanned PDF — Multimodal Vision directly via Gemma
-    const canvases = Array.from(document.querySelectorAll('#pdf-pages canvas'));
-    if(!canvases.length) throw Error('No rendered pages to inspect');
-
-    this.toast('Gemma visually inspecting page…');
-    const targetCanvas = canvases[Math.min(this.page - 1, canvases.length - 1)] || canvases[0];
-    const imgDataUrl = targetCanvas.toDataURL('image/jpeg', 0.85);
-
-    const base = (cfg.url || 'http://127.0.0.1:8080').replace(/\/$/, '');
-    const sys = `You are a precision multimodal document assistant. You inspect document images and determine where to stamp text.
-Return ONLY raw JSON with coordinates as percentages from top-left:
-{"stamps":[{"page":1,"x_pct":25.5,"y_pct":32.0,"text":"Jane Doe","size":12}]}
-Rules:
-- x_pct: horizontal position from left edge (0.0 to 100.0).
-- y_pct: vertical position from TOP edge (0.0 to 100.0). Place text directly inside form lines or boxes.
-- page: 1-based page number.
-- size: font size (default 11-13).
-- Do not output markdown fences or commentary. Return raw JSON only.`;
-
-    const body = {
-      model: 'local',
-      temperature: 0.1,
-      max_tokens: 1024,
-      messages: [
-        { role: 'system', content: sys },
-        {
-          role: 'user',
-          content: [
-            { type: 'text', text: 'INSTRUCTION: ' + instruction },
-            { type: 'image_url', image_url: { url: imgDataUrl } }
-          ]
-        }
-      ]
-    };
-
-    const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), 90000);
-    let res;
-    try {
-      res = await fetch(base + '/v1/chat/completions', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-        signal: ctrl.signal
-      });
-    } finally {
-      clearTimeout(timer);
+    // Path B: flat / scanned PDF — OCR (ML Kit) → main model → stamp text at PDF coordinates
+    if(!this.path) throw Error('No PDF open');
+    this.toast('OCR layout (on-device)…');
+    let ocr;
+    try{
+      ocr = J.parse(await nat('ocr_pdf',{path:this.path, max_pages:8}));
+    }catch(e){
+      throw Error('OCR failed: '+(e.message||e)+'. ML Kit must be available (Play services). Scans cannot use AcroForm fill.');
     }
-    if(!res.ok) throw Error('Model vision error HTTP ' + res.status);
-    const data = await res.json();
-    let raw = data.choices?.[0]?.message?.content || '{}';
-    raw = raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
-    const match = raw.match(/\{[\s\S]*\}/);
-    if(match) raw = match[0];
-    const parsed = JSON.parse(raw);
-    const stamps = parsed.stamps || [];
-    if(!stamps.length) throw Error('Model returned no stamps for this page');
-
-    let n = 0;
+    const data = ocr.data || {};
+    // Cache OCR context on the PDF object for later reconstruct / follow-up fills
+    this._ocrCache = {ts:Date.now(), path:this.path, text:ocr.text||'', data};
+    let anchors = (data.anchors || []).slice(0, 40);
+    const lines = (data.lines || []).slice(0, 120).map(l=>({
+      page:l.page, text:l.text,
+      x:l.box&&l.box.x, y:l.box&&l.box.y, w:l.box&&l.box.w, h:l.box&&l.box.h
+    }));
+    // Reconstruct tables / multi-column layout from line geometry (uses cached boxes)
+    const layout = reconstructOcrLayout({text:ocr.text, lines:data.lines||[]});
+    this._ocrCache.layout = layout;
+    // If ML Kit returned text but no label anchors, synthesize blanks to the right of short lines
+    if(!anchors.length && lines.length){
+      anchors = lines.filter(l=>l.text && l.text.length<48 && l.x!=null).slice(0,30).map(l=>({
+        label:(l.text||'').replace(/:$/,'').trim(),
+        page:l.page||1,
+        x:(l.x||0)+(l.w||80)+8,
+        y:l.y||100,
+        size:Math.max(10, Math.min(14, (l.h||12))),
+        hint:'right_of_line'
+      }));
+    }
+    if(!anchors.length && !lines.length){
+      const hint=(ocr.text||'').trim().slice(0,200);
+      throw Error('OCR found no text/layout'+(hint?': '+hint:'')+' — try a clearer scan or higher-res PDF');
+    }
+    const sys = `You fill a non-interactive (scanned/flat) PDF by placing text at coordinates.
+Coordinates are PDF user space: origin bottom-left, units points, y increases upward.
+Prefer "anchors" (suggested blanks). You may place relative to OCR line boxes.
+When TABLES are present, treat cells as labeled fields when the instruction mentions them.
+Output ONLY JSON:
+{"stamps":[{"page":1,"x":120.5,"y":400.2,"text":"Jane Doe","size":12}, ...]}
+page is 1-based. Only use values from the user instruction. Skip unknown fields.`;
+    const tableHint = (layout.tables&&layout.tables.length)
+      ? '\n\nRECONSTRUCTED TABLES (from OCR geometry):\n'+layout.tables.map(t=>t.markdown).join('\n\n')
+      : '';
+    const structHint = layout.structured ? '\n\nSTRUCTURED LAYOUT:\n'+layout.structured.slice(0,2500) : '';
+    const user = 'INSTRUCTION:\n'+instruction+'\n\nANCHORS:\n'+JSON.stringify(anchors)+'\n\nOCR LINES:\n'+JSON.stringify(lines.slice(0,60))+tableHint+structHint;
+    if($('#pdf-ai-status')) $('#pdf-ai-status').textContent='OCR ok · calling main model…';
+    const parsed = await this.chatJson(sys, user, 1400);
+    const stamps = parsed.stamps || parsed.placements || [];
+    let n=0;
     for(const s of stamps){
-      if(!s || s.text == null || s.text === '') continue;
-      const pageIdx = Math.max(0, (parseInt(s.page, 10) || 1) - 1);
-      const page = this.libDoc.getPages()[pageIdx];
-      if(!page) continue;
-      const { width: pw, height: ph } = page.getSize();
-      const xPct = parseFloat(s.x_pct);
-      const yPct = parseFloat(s.y_pct);
-      if(isNaN(xPct) || isNaN(yPct)) continue;
-
-      // Convert top-left percentages to PDF user coordinates (bottom-left origin)
-      const pdfX = (xPct / 100.0) * pw;
-      const pdfY = ph - (yPct / 100.0) * ph - (s.size || 12);
-      await this.stampText(String(s.text), pageIdx, pdfX, pdfY, s.size || 12);
+      if(!s || s.text==null || s.text==='') continue;
+      const pageIndex = Math.max(0, (parseInt(s.page,10)||1) - 1);
+      const x = Number(s.x), y = Number(s.y);
+      if(!Number.isFinite(x) || !Number.isFinite(y)) continue;
+      const size = Number(s.size)||12;
+      await this.stampText(String(s.text), pageIndex, x, y, size);
       n++;
     }
-    this.dirty = true;
-    await this.reloadViewer();    return n;
+    if(!n) throw Error('Model returned no placeable stamps — try: "Name: Jane Doe" style instructions matching labels OCR saw');
+    this.dirty=true;
+    return n;
   },
 };
 
@@ -2843,54 +2757,6 @@ document.addEventListener('click', (e)=>{
       PDF.toast('Tap the page to place your signature');
     }catch(e){ PDF.toast(String(e.message||e), true); }
   });
-})();
-
-
-// PDF pinch-to-zoom and zoom buttons
-(function(){
-  const wrap = $('#pdf-canvas-wrap');
-  if(!wrap) return;
-  let initDist = 0, startZoom = 1.0;
-
-  wrap.addEventListener('touchstart', (e)=>{
-    if(e.touches.length === 2){
-      initDist = Math.hypot(
-        e.touches[0].clientX - e.touches[1].clientX,
-        e.touches[0].clientY - e.touches[1].clientY
-      );
-      startZoom = PDF.zoom || 1.0;
-    }
-  }, {passive: true});
-
-  wrap.addEventListener('touchmove', (e)=>{
-    if(e.touches.length === 2 && initDist > 0){
-      const dist = Math.hypot(
-        e.touches[0].clientX - e.touches[1].clientX,
-        e.touches[0].clientY - e.touches[1].clientY
-      );
-      PDF.setZoom(startZoom * (dist / initDist));
-    }
-  }, {passive: true});
-
-  wrap.addEventListener('touchend', (e)=>{
-    if(e.touches.length < 2) initDist = 0;
-  });
-
-  // Double-tap zoom toggle
-  let lastTap = 0;
-  wrap.addEventListener('click', (e)=>{
-    if(PDF.placeMode) return;
-    const now = Date.now();
-    if(now - lastTap < 300){
-      PDF.setZoom((PDF.zoom || 1.0) > 1.2 ? 1.0 : 1.8);
-      lastTap = 0;
-    } else {
-      lastTap = now;
-    }
-  });
-
-  $('#pdf-zoom-in')?.addEventListener('click', ()=> PDF.setZoom((PDF.zoom || 1.0) + 0.25));
-  $('#pdf-zoom-out')?.addEventListener('click', ()=> PDF.setZoom((PDF.zoom || 1.0) - 0.25));
 })();
 
 $('#pdf-btn-text')?.addEventListener('click',()=>{
@@ -3353,11 +3219,11 @@ async function edRenderBrowser(){
     const entries=await edListDir(edPath);
     list.innerHTML='';
     if(edPath!=='.'&&edPath!==''){
-      const up=document.createElement('div');up.className='fb-row';up.innerHTML='<span>⬆ .. (up)</span>';up.onclick=()=>{const parts=edPath.split('/').filter(Boolean);parts.pop();edPath=parts.join('/')||'.';edRenderBrowser()};list.appendChild(up);
+      const up=document.createElement('div');up.className='fb-row';up.innerHTML='<span>📁 ..</span>';up.onclick=()=>{const parts=edPath.split('/').filter(Boolean);parts.pop();edPath=parts.join('/')||'.';edRenderBrowser()};list.appendChild(up);
     }
     entries.forEach(e=>{
       const row=document.createElement('div');row.className='fb-row';
-      row.innerHTML=`<span>${e.d ? VOXEL.folder : VOXEL.file} ${e.n}</span><span class="meta">${e.d?'':(e.s>1024?Math.round(e.s/1024)+'KB':e.s+'B')}</span>`;
+      row.innerHTML=`<span>${e.d?'📁':'📄'} ${e.n}</span><span class="meta">${e.d?'':(e.s>1024?Math.round(e.s/1024)+'KB':e.s+'B')}</span>`;
       row.onclick=async()=>{
         if(e.d){edPath=e.p;edRenderBrowser();return}
         try{
@@ -3555,6 +3421,19 @@ function edCheckSyntax(code, file){
   }
 }
 
+/** Wait until llama-server /health is OK (avoids edits while "Starting model…"). */
+async function edWaitServerReady(base, ms){
+  const deadline=Date.now()+(ms||180000);
+  while(Date.now()<deadline){
+    try{
+      const c=await fetch(base+'/health',{method:'GET',signal:AbortSignal.timeout(1500)});
+      if(c.ok) return true;
+    }catch(_){}
+    await new Promise(r=>setTimeout(r,500));
+  }
+  return false;
+}
+
 async function edExecuteStep(heal){
   edClearHL();
   const instruction=edSteps[edIdx];
@@ -3564,18 +3443,29 @@ async function edExecuteStep(heal){
   $('#ed-rstat').style.color=heal?'var(--violet)':'var(--gold)';
   $('#ed-g-confirm').disabled=true;$('#ed-g-retry').disabled=true;$('#ed-g-manual').disabled=true;
   $('#ed-review').classList.add('active');edLock(true);
-  // Power user: optional per-extension model (no-copy path already bound)
-  if(cfg.power && cfg.ext_models && edFile){
-    const ext='.'+((edFile.split('.').pop()||'').toLowerCase());
-    const want=cfg.ext_models[ext]||cfg.ext_models[ext.slice(1)];
-    if(want){
-      try{
-        await nat('select_model',{path:want, slot:'coder'});
-        await nat('swap_model',{slot:'coder'});
-        await ninfo();
-      }catch(_){ /* stay on current coder */ }
+
+  // Ensure a live model ONCE per chain — never select_model/swap on every step (that caused
+  // perpetual "Starting model…" and every edit to fail mid-load).
+  if(!heal && !ed._coderReady){
+    try{
+      await ninfo();
+      if(NI && NI.coder_model && NI.active_slot!=='coder'){
+        $('#ed-rstat').textContent='Loading coder model…';
+        const r=await Route.ensure('coder','Loading coder for code assist…');
+        if(r && r.ok===false) throw new Error(r.error||'Coder failed to start');
+      } else if(NI && !NI.coder_model){
+        // Use whatever is already on :8080 (chat)
+        $('#ed-rstat').textContent='Using chat model (no coder bound)…';
+      }
+      ed._coderReady=true;
+    }catch(e){
+      $('#ed-rstat').textContent='Model: '+(e.message||e).toString().slice(0,48);
+      $('#ed-rstat').style.color='var(--ember)';
+      $('#ed-g-retry').disabled=false;$('#ed-g-manual').disabled=false;
+      return;
     }
   }
+
   if(!heal&&edBackup===null)edBackup=ed.getValue();
   if(edBackup===null)edBackup=ed.getValue();
   const sys=`You are a precision code editor. Output ONLY one raw JSON object. Use the SMALLEST possible edit; never re-output the file.
@@ -3587,8 +3477,18 @@ Rules: 1. search must be EXACT unique copy from buffer. 2. Empty buffer: search 
   let raw='';
   try{
     const base=(cfg.url||'http://127.0.0.1:8080').replace(/\/$/,'');
-    // Constrain decode with JSON Schema (llama-server converts to GBNF). Makes malformed output
-    // physically hard so the heal round is almost never needed on small local models.
+    $('#ed-rstat').textContent='Waiting for model server…';
+    const up=await edWaitServerReady(base, 180000);
+    if(!up) throw new Error('Model server not ready (still starting). Wait and Retry.');
+    $('#ed-rstat').textContent=heal?'Self-healing…':'Generating edit…';
+
+    const bodyBase = {
+      model: "local",
+      messages,
+      max_tokens: edBackup.trim() ? 1200 : 4096,
+      temperature: 0.1
+    };
+    // Prefer json_schema when supported; fall back to plain JSON instructions if rejected
     const editSchema = {
       type: "object",
       additionalProperties: false,
@@ -3609,30 +3509,43 @@ Rules: 1. search must be EXACT unique copy from buffer. 2. Empty buffer: search 
         }
       }
     };
-    const body = {
-      model: "local",
-      messages,
-      max_tokens: edBackup.trim() ? 1200 : 4096,
-      temperature: 0.1,
-      response_format: {
-        type: "json_schema",
-        json_schema: { name: "code_edit", strict: true, schema: editSchema }
-      }
-    };
     if(edAiAbortCtrl) try{ edAiAbortCtrl.abort(); }catch(_){}
     edAiAbortCtrl = new AbortController();
-    const res=await fetch(base+'/v1/chat/completions',{
-      method:'POST',
-      headers:{'Content-Type':'application/json'},
-      signal: edAiAbortCtrl.signal,
-      body:JSON.stringify(body)
-    });
-    if(!res.ok)throw new Error(`HTTP ${res.status}: ${(await res.text()).slice(0,120)}`);
-    const data=await res.json();
+    async function postCompletions(withSchema){
+      const body=Object.assign({}, bodyBase);
+      if(withSchema){
+        body.response_format={
+          type:"json_schema",
+          json_schema:{ name:"code_edit", strict:true, schema:editSchema }
+        };
+      }
+      const res=await fetch(base+'/v1/chat/completions',{
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        signal: edAiAbortCtrl.signal,
+        body:JSON.stringify(body)
+      });
+      const txt=await res.text();
+      if(!res.ok){
+        const err=new Error(`HTTP ${res.status}: ${txt.slice(0,160)}`);
+        err.status=res.status; err.body=txt;
+        throw err;
+      }
+      return JSON.parse(txt);
+    }
+    let data;
+    try{
+      data=await postCompletions(true);
+    }catch(e1){
+      // 400/500 often = schema unsupported on this llama-server build
+      if(e1.status===400||e1.status===500||/schema|grammar|gbnf|response_format/i.test(String(e1.body||e1.message||''))){
+        data=await postCompletions(false);
+      } else throw e1;
+    }
     if(data.error)throw new Error(typeof data.error==='string'?data.error:(data.error.message||'provider error'));
     raw=data.choices?.[0]?.message?.content||'{}';
     const edit=edExtractJson(raw);
-    if(edit.replace===undefined&&!Array.isArray(edit.edits))throw new Error('Invalid edit payload');
+    if(edit.replace===undefined&&!Array.isArray(edit.edits))throw new Error('Invalid edit payload: '+String(raw).slice(0,80));
     // multi-edit: apply sequentially as single search/replace ops
     const ops=Array.isArray(edit.edits)?edit.edits:[{search:edit.search||'',replace:edit.replace}];
     let work=edBackup.replace(/\r\n/g,'\n');
@@ -3685,6 +3598,7 @@ $('#ed-start-chain')?.addEventListener('click',()=>{
   if(!active.length){edToast('Add at least one step','error');return}
   if(!ed){edToast('Open the editor first','error');return}
   edSteps=active;edIdx=0;edChainRunning=true;edBackup=null;edHist=[];edHistN=0;
+  ed._coderReady=false; // re-check health once at start of this chain only
   $('#ed-ai-sheet').classList.remove('open');$('#ed-ai-bd').classList.remove('open');
   edExecuteStep();
 });
@@ -3740,7 +3654,26 @@ function fillExtModels(){
     </div>`;
   }).join('');
 }
-function syncOcrUI(){}
+function syncOcrUI(){
+  const s=$('#ocr-s'), st=$('#ocr-st');
+  const path=(NI&&NI.ocr_path)||cfg.ocr_path||'';
+  const ready=NI&&NI.ocr_ready;
+  if(s){
+    if(!path) s.textContent='not set · using ML Kit';
+    else if(ready) s.textContent=path.split('/').pop()+' · vision server :8082 ready';
+    else s.textContent=path.split('/').pop()+' · bound (waiting :8082 or ML Kit fallback)';
+  }
+  if(st) st.textContent='OCR path (optional)';
+  const del=$('#ocr-del');
+  if(del) del.style.display=path?'inline-block':'none';
+  const m=$('#ocr-m');
+  if(m){
+    if(!path) m.textContent='';
+    else m.textContent=ready
+      ? 'Vision OCR live — put mmproj next to the GGUF for images. Line boxes still from ML Kit when available.'
+      : 'Bound → '+path+' — place a matching *mmproj*.gguf beside it, or OCR uses ML Kit.';
+  }
+}
 /** Reconstruct rough tables / column blocks from OCR line boxes (uses last OCR cache). */
 function reconstructOcrLayout(ocrData){
   if(!ocrData) return {tables:[], structured:''};
@@ -3801,94 +3734,32 @@ function reconstructOcrLayout(ocrData){
 
 async function refreshModelsList(){
   const box=$('#models-list'); if(!box)return;
-  box.innerHTML='<div style="color:var(--fg-3);padding:12px;text-align:center">Scanning folders…</div>';
+  box.innerHTML='<div style="color:var(--fg-3);padding:8px">Loading…</div>';
   try{
-    ninfo();
+    // Listing only — do not auto_bind/restartServers on every Settings open
     const r=JSON.parse(await nat('list_models_dir',{}));
     const models=(r.models)||[];
     if($('#models-dir-in') && r.path) $('#models-dir-in').value=r.path;
-
+    const subs=(r.subdirs||['llm','embed','coder','image','ocr','decision']).join(', ');
     if(!models.length){
-      box.innerHTML=`<div style="color:var(--fg-3);padding:14px;line-height:1.5;text-align:center">
-        No <code>.gguf</code> models found in <b>${esc(r.path||'Local Models')}</b>.<br>
-        Create or use subfolders:<br>
-        <code>llm/</code> (Chat & Vision) · <code>coder/</code> · <code>embed/</code>
-      </div>`;
+      box.innerHTML=`<div style="color:var(--fg-3);padding:8px;line-height:1.45">No .gguf files yet under <b>${esc(r.path||'Local Models')}</b>.<br>Subfolders ready: <code>${esc(subs)}</code><br>Drop models into the matching folder, then Refresh.<br><span style="opacity:.85">OCR GGUF is optional — bind under OCR slot if you have one; otherwise AI Fill uses ML Kit + your chat model.</span></div>`;
       return;
     }
-
-    const FOLDERS = {
-      llm: { title: 'llm/', desc: 'Chat & Vision models (Gemma, Llama)', iconSvg: VOXEL.llm },
-      coder: { title: 'coder/', desc: 'Coding models for editor (Qwen Coder)', iconSvg: VOXEL.coder },
-      embed: { title: 'embed/', desc: 'Embedding models for Edge Memory (Nomic)', iconSvg: VOXEL.embed },
-      image: { title: 'image/', desc: 'Multimodal Vision models', iconSvg: VOXEL.image },
-      root: { title: 'root /', desc: 'Models in root folder', iconSvg: VOXEL.root }
-    };
-
-    const grouped = {};
-    Object.keys(FOLDERS).forEach(k => grouped[k] = []);
-    models.forEach(m => {
-      const cat = (m.category && FOLDERS[m.category]) ? m.category : 'root';
-      if(!grouped[cat]) grouped[cat] = [];
-      grouped[cat].push(m);
-    });
-
-    let outHtml = '';
-    for(const [catKey, meta] of Object.entries(FOLDERS)){
-      const list = grouped[catKey] || [];
-      if(!list.length && (catKey === 'image' || catKey === 'root')) continue;
-
-      outHtml += `<div style="margin-bottom:12px;background:var(--bg-elevated);border-radius:10px;border:1px solid var(--line);overflow:hidden">
-        <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 10px;background:var(--bg-subtle);border-bottom:1px solid var(--line)">
-          <div style="display:flex;align-items:center;gap:6px">
-            ${meta.iconSvg}
-            <b style="font-family:var(--mono);font-size:13px;color:var(--fg)">${meta.title}</b>
-            <small style="color:var(--fg-3);font-size:11px">${meta.desc}</small>
-          </div>
-          <span style="font-size:11px;font-weight:600;color:var(--fg-3);background:var(--bg-well);padding:2px 7px;border-radius:999px">${list.length}</span>
-        </div>`;
-
-      if(!list.length){
-        outHtml += `<div style="padding:10px 12px;font-size:12px;color:var(--fg-3);font-style:italic">Folder empty — drop GGUF files here</div></div>`;
-        continue;
-      }
-
-      outHtml += `<div style="display:flex;flex-direction:column;gap:1px">`;
-      for(const m of list){
-        const mb = m.mb!=null ? (m.mb>=1024?(m.mb/1024).toFixed(2)+' GB':Math.round(m.mb)+' MB') : Math.round((m.size||0)/1048576)+' MB';
-        const isChat = NI && NI.model_path && NI.model_path === m.path;
-        const isCoder = NI && NI.coder_path && NI.coder_path === m.path;
-        const isEmb = NI && NI.emb_path && NI.emb_path === m.path;
-
-        let badges = '';
-        if(isChat) badges += `<span style="font-size:10px;font-weight:600;padding:2px 6px;border-radius:6px;background:rgba(34,197,94,.18);color:var(--success);border:1px solid rgba(34,197,94,.3)">Active Chat</span> `;
-        if(isCoder) badges += `<span style="font-size:10px;font-weight:600;padding:2px 6px;border-radius:6px;background:rgba(94,234,212,.18);color:var(--cyan);border:1px solid rgba(94,234,212,.3)">Active Coder</span> `;
-        if(isEmb) badges += `<span style="font-size:10px;font-weight:600;padding:2px 6px;border-radius:6px;background:rgba(167,139,250,.18);color:var(--violet);border:1px solid rgba(167,139,250,.3)">Active Embed</span> `;
-
-        const chatClass = catKey==='llm' ? 'btn sm go' : 'btn sm';
-        const coderClass = catKey==='coder' ? 'btn sm go' : 'btn sm';
-        const embClass = catKey==='embed' ? 'btn sm go' : 'btn sm';
-
-        outHtml += `<div style="padding:8px 10px;display:flex;flex-direction:column;gap:5px;border-bottom:1px solid var(--line);background:${(isChat||isCoder||isEmb)?'var(--bg-well)':'transparent'}">
-          <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px">
-            <div style="font-size:13px;font-weight:500;word-break:break-all;color:var(--fg)">
-              ${badges}${esc(m.name)}
-            </div>
-            <span style="font-size:11px;color:var(--fg-3);font-family:var(--mono);flex-shrink:0">${mb}</span>
-          </div>
-          <div style="display:flex;gap:6px;flex-wrap:wrap">
-            <button class="${chatClass}" data-bind-model="chat" data-path="${ea(m.path)}" ${isChat?'style="opacity:.6" disabled':''}>${isChat?'✓ Chat':'Set Chat'}</button>
-            <button class="${coderClass}" data-bind-model="coder" data-path="${ea(m.path)}" ${isCoder?'style="opacity:.6" disabled':''}>${isCoder?'✓ Coder':'Set Coder'}</button>
-            <button class="${embClass}" data-bind-model="emb" data-path="${ea(m.path)}" ${isEmb?'style="opacity:.6" disabled':''}>${isEmb?'✓ Embed':'Set Embed'}</button>
-          </div>
-        </div>`;
-      }
-      outHtml += `</div></div>`;
-    }
-
-    box.innerHTML = outHtml;
+    box.innerHTML=`<div style="font-size:11px;color:var(--fg-3);padding:4px 6px 8px">Subfolders: ${esc(subs)}</div>`+models.map(m=>{
+      const mb=m.mb!=null?Math.round(m.mb)+' MB':Math.round((m.size||0)/1048576)+' MB';
+      const cat=m.category&&m.category!=='root'?` <span style="font-size:10px;padding:1px 6px;border-radius:999px;background:var(--bg-well);color:var(--fg-3)">${esc(m.category)}</span>`:'';
+      return `<div style="display:flex;flex-direction:column;gap:4px;padding:8px 6px;border-bottom:1px solid var(--line)">
+        <div style="font-weight:500;word-break:break-all">${esc(m.name)}${cat} <span style="color:var(--fg-3);font-weight:400">· ${mb}</span></div>
+        <div style="display:flex;flex-wrap:wrap;gap:6px">
+          <button class="btn sm" data-bind-model="chat" data-path="${ea(m.path)}">Chat</button>
+          <button class="btn sm" data-bind-model="coder" data-path="${ea(m.path)}">Coder</button>
+          <button class="btn sm" data-bind-model="emb" data-path="${ea(m.path)}">Embed</button>
+          <button class="btn sm" data-bind-model="ocr" data-path="${ea(m.path)}">OCR</button>
+        </div>
+      </div>`;
+    }).join('');
   }catch(e){
-    box.innerHTML=`<div style="color:var(--danger);padding:10px">${esc(e.message||e)}</div>`;
+    box.innerHTML=`<div style="color:var(--danger);padding:8px">${esc(e.message||e)}<br><span style="color:var(--fg-3)">Grant all-files access if needed.</span></div>`;
   }
 }
 
@@ -4154,7 +4025,7 @@ const FV = {
         row.dataset.path=e.p;
         const size=e.d?'':(e.s>=1048576?(e.s/1048576).toFixed(1)+' MB':e.s>=1024?Math.round(e.s/1024)+' KB':e.s+' B');
         row.innerHTML=`<input type="checkbox" class="fv-check" ${on?'checked':''} style="margin-right:8px;flex:none">
-          <div class="ico ${e.d?'dir':''}">${e.d ? VOXEL.folder : VOXEL.file}</div>
+          <div class="ico ${e.d?'dir':''}">${e.d?'📁':'📄'}</div>
           <div class="name">${esc(e.n)}${gated?'<span class="gate-badge blocked">AI blocked</span>':''}</div>
           <div class="meta">${size||(e.m||'')}</div>`;
         const check=row.querySelector('.fv-check');
@@ -4362,7 +4233,7 @@ FV.renderFromCache = function(){
     row.className='fv-row'+(gated?' gate-blocked':'')+(on?' sel':'');
     const size=e.d?'':(e.s>=1048576?(e.s/1048576).toFixed(1)+' MB':e.s>=1024?Math.round(e.s/1024)+' KB':e.s+' B');
     row.innerHTML=`<input type="checkbox" class="fv-check" ${on?'checked':''} style="margin-right:8px;flex:none">
-      <div class="ico ${e.d?'dir':''}">${e.d ? VOXEL.folder : VOXEL.file}</div>
+      <div class="ico ${e.d?'dir':''}">${e.d?'📁':'📄'}</div>
       <div class="name">${esc(e.n)}</div>
       <div class="meta">${size||(e.m||'')}</div>`;
     const check=row.querySelector('.fv-check');
