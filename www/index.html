@@ -607,6 +607,18 @@ textarea.in{height:auto;min-height:64px;padding:9px 12px;font:13px/19px var(--mo
  <div class="sh-f"><button class="btn p" id="s-ok">Done</button></div>
 </div></div>
 <script>
+
+/* Crisp Voxel Symbols for Kojot */
+const VOXEL = {
+  llm: `<svg viewBox="0 0 16 16" width="16" height="16" style="shape-rendering:crispEdges;display:inline-block;vertical-align:-2px"><rect x="3" y="2" width="10" height="2" fill="#fbbf24"/><rect x="2" y="4" width="12" height="6" fill="#f59e0b"/><rect x="4" y="6" width="2" height="2" fill="#171717"/><rect x="7" y="6" width="2" height="2" fill="#171717"/><rect x="10" y="6" width="2" height="2" fill="#171717"/><rect x="3" y="10" width="10" height="2" fill="#d97706"/><rect x="4" y="12" width="3" height="2" fill="#d97706"/><rect x="4" y="14" width="2" height="1" fill="#b45309"/></svg>`,
+  coder: `<svg viewBox="0 0 16 16" width="16" height="16" style="shape-rendering:crispEdges;display:inline-block;vertical-align:-2px"><rect x="1" y="2" width="14" height="12" rx="1" fill="#142429"/><rect x="3" y="4" width="2" height="2" fill="#5eead4"/><rect x="2" y="6" width="2" height="3" fill="#5eead4"/><rect x="3" y="9" width="2" height="2" fill="#5eead4"/><rect x="8" y="4" width="2" height="2" fill="#2dd4bf"/><rect x="7" y="6" width="2" height="3" fill="#2dd4bf"/><rect x="6" y="9" width="2" height="2" fill="#2dd4bf"/><rect x="11" y="4" width="2" height="2" fill="#5eead4"/><rect x="12" y="6" width="2" height="3" fill="#5eead4"/><rect x="11" y="9" width="2" height="2" fill="#5eead4"/></svg>`,
+  embed: `<svg viewBox="0 0 16 16" width="16" height="16" style="shape-rendering:crispEdges;display:inline-block;vertical-align:-2px"><polygon points="8,1 14,4 8,7 2,4" fill="#c4b5fd"/><polygon points="2,4 8,7 8,15 2,12" fill="#8b5cf6"/><polygon points="8,7 14,4 14,12 8,15" fill="#6d28d9"/><polygon points="6,9 8,10 8,12 6,11" fill="#a78bfa"/></svg>`,
+  image: `<svg viewBox="0 0 16 16" width="16" height="16" style="shape-rendering:crispEdges;display:inline-block;vertical-align:-2px"><rect x="4" y="2" width="4" height="2" fill="#10b981"/><rect x="2" y="4" width="12" height="9" fill="#059669"/><rect x="1" y="5" width="1" height="7" fill="#047857"/><rect x="14" y="5" width="1" height="7" fill="#047857"/><rect x="5" y="6" width="6" height="5" fill="#0f172a"/><rect x="6" y="7" width="4" height="3" fill="#34d399"/><rect x="7" y="8" width="2" height="2" fill="#022c22"/><rect x="6" y="7" width="1" height="1" fill="#ffffff"/></svg>`,
+  root: `<svg viewBox="0 0 16 16" width="16" height="16" style="shape-rendering:crispEdges;display:inline-block;vertical-align:-2px"><rect x="2" y="3" width="5" height="2" fill="#94a3b8"/><rect x="2" y="5" width="12" height="2" fill="#64748b"/><rect x="2" y="7" width="12" height="7" fill="#475569"/><rect x="3" y="8" width="10" height="1" fill="#64748b"/></svg>`,
+  folder: `<svg viewBox="0 0 16 16" width="15" height="15" style="shape-rendering:crispEdges;display:inline-block;vertical-align:-2px"><rect x="2" y="3" width="5" height="2" fill="#fbbf24"/><rect x="2" y="5" width="12" height="8" fill="#f59e0b"/><rect x="2" y="7" width="12" height="6" fill="#d97706"/></svg>`,
+  file: `<svg viewBox="0 0 16 16" width="15" height="15" style="shape-rendering:crispEdges;display:inline-block;vertical-align:-2px"><rect x="3" y="1" width="7" height="14" fill="#cbd5e1"/><polygon points="10,1 13,4 10,4" fill="#94a3b8"/><rect x="10" y="4" width="3" height="11" fill="#cbd5e1"/><rect x="5" y="5" width="4" height="1" fill="#64748b"/><rect x="5" y="8" width="6" height="1" fill="#64748b"/><rect x="5" y="11" width="5" height="1" fill="#64748b"/></svg>`
+};
+
 const $=s=>document.querySelector(s),LS=localStorage,J=JSON;
 const DEF={url:'http://127.0.0.1:8080',sys:'You are a helpful, concise assistant.',t:.7,m:1024,theme:'auto',power:false,thoughts:true,vision:false,coder_t:0.1,p_coder:{},srv_coder:{},xj_coder:'',files:true,ask:true,github:{token:'',repo:'420garbage420/kojot'},search:{on:true,prov:'tavily',keys:{},max:5,depth:'basic',sx:'',cu:'',cm:'GET',ch:'',cb:''},p:{},srv:{},xj:'',project:{name:'',conventions:''},profile:'balanced',auto_coder:false,tool_cache:true,mem_auto:true,file_gates:[],ocr_engine:'mlkit',ocr_path:'',ext_models:{}};
 const saved=(()=>{try{return J.parse(LS.getItem('lc.cfg')||'{}')}catch{return{}}})();
@@ -3327,11 +3339,11 @@ async function edRenderBrowser(){
     const entries=await edListDir(edPath);
     list.innerHTML='';
     if(edPath!=='.'&&edPath!==''){
-      const up=document.createElement('div');up.className='fb-row';up.innerHTML='<span>📁 ..</span>';up.onclick=()=>{const parts=edPath.split('/').filter(Boolean);parts.pop();edPath=parts.join('/')||'.';edRenderBrowser()};list.appendChild(up);
+      const up=document.createElement('div');up.className='fb-row';up.innerHTML='<span>⬆ .. (up)</span>';up.onclick=()=>{const parts=edPath.split('/').filter(Boolean);parts.pop();edPath=parts.join('/')||'.';edRenderBrowser()};list.appendChild(up);
     }
     entries.forEach(e=>{
       const row=document.createElement('div');row.className='fb-row';
-      row.innerHTML=`<span>${e.d?'📁':'📄'} ${e.n}</span><span class="meta">${e.d?'':(e.s>1024?Math.round(e.s/1024)+'KB':e.s+'B')}</span>`;
+      row.innerHTML=`<span>${e.d ? VOXEL.folder : VOXEL.file} ${e.n}</span><span class="meta">${e.d?'':(e.s>1024?Math.round(e.s/1024)+'KB':e.s+'B')}</span>`;
       row.onclick=async()=>{
         if(e.d){edPath=e.p;edRenderBrowser();return}
         try{
@@ -3786,17 +3798,17 @@ async function refreshModelsList(){
       box.innerHTML=`<div style="color:var(--fg-3);padding:14px;line-height:1.5;text-align:center">
         No <code>.gguf</code> models found in <b>${esc(r.path||'Local Models')}</b>.<br>
         Create or use subfolders:<br>
-        📁 <code>llm/</code> (Chat & Vision) · 📁 <code>coder/</code> · 📁 <code>embed/</code>
+        <code>llm/</code> (Chat & Vision) · <code>coder/</code> · <code>embed/</code>
       </div>`;
       return;
     }
 
     const FOLDERS = {
-      llm: { title: 'llm/', desc: 'Chat & Multimodal Vision models (Gemma, Llama)', icon: '💬' },
-      coder: { title: 'coder/', desc: 'Coding models for editor (Qwen Coder)', icon: '⚡' },
-      embed: { title: 'embed/', desc: 'Embedding models for Edge Memory (Nomic)', icon: '🧠' },
-      image: { title: 'image/', desc: 'Vision & Multimodal models', icon: '👁️' },
-      root: { title: 'root /', desc: 'Models in root folder', icon: '📁' }
+      llm: { title: 'llm/', desc: 'Chat & Vision models (Gemma, Llama)', iconSvg: VOXEL.llm },
+      coder: { title: 'coder/', desc: 'Coding models for editor (Qwen Coder)', iconSvg: VOXEL.coder },
+      embed: { title: 'embed/', desc: 'Embedding models for Edge Memory (Nomic)', iconSvg: VOXEL.embed },
+      image: { title: 'image/', desc: 'Multimodal Vision models', iconSvg: VOXEL.image },
+      root: { title: 'root /', desc: 'Models in root folder', iconSvg: VOXEL.root }
     };
 
     const grouped = {};
@@ -3815,7 +3827,7 @@ async function refreshModelsList(){
       outHtml += `<div style="margin-bottom:12px;background:var(--bg-elevated);border-radius:10px;border:1px solid var(--line);overflow:hidden">
         <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 10px;background:var(--bg-subtle);border-bottom:1px solid var(--line)">
           <div style="display:flex;align-items:center;gap:6px">
-            <span>${meta.icon}</span>
+            ${meta.iconSvg}
             <b style="font-family:var(--mono);font-size:13px;color:var(--fg)">${meta.title}</b>
             <small style="color:var(--fg-3);font-size:11px">${meta.desc}</small>
           </div>
@@ -4128,7 +4140,7 @@ const FV = {
         row.dataset.path=e.p;
         const size=e.d?'':(e.s>=1048576?(e.s/1048576).toFixed(1)+' MB':e.s>=1024?Math.round(e.s/1024)+' KB':e.s+' B');
         row.innerHTML=`<input type="checkbox" class="fv-check" ${on?'checked':''} style="margin-right:8px;flex:none">
-          <div class="ico ${e.d?'dir':''}">${e.d?'📁':'📄'}</div>
+          <div class="ico ${e.d?'dir':''}">${e.d ? VOXEL.folder : VOXEL.file}</div>
           <div class="name">${esc(e.n)}${gated?'<span class="gate-badge blocked">AI blocked</span>':''}</div>
           <div class="meta">${size||(e.m||'')}</div>`;
         const check=row.querySelector('.fv-check');
@@ -4336,7 +4348,7 @@ FV.renderFromCache = function(){
     row.className='fv-row'+(gated?' gate-blocked':'')+(on?' sel':'');
     const size=e.d?'':(e.s>=1048576?(e.s/1048576).toFixed(1)+' MB':e.s>=1024?Math.round(e.s/1024)+' KB':e.s+' B');
     row.innerHTML=`<input type="checkbox" class="fv-check" ${on?'checked':''} style="margin-right:8px;flex:none">
-      <div class="ico ${e.d?'dir':''}">${e.d?'📁':'📄'}</div>
+      <div class="ico ${e.d?'dir':''}">${e.d ? VOXEL.folder : VOXEL.file}</div>
       <div class="name">${esc(e.n)}</div>
       <div class="meta">${size||(e.m||'')}</div>`;
     const check=row.querySelector('.fv-check');
