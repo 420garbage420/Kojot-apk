@@ -308,7 +308,8 @@ textarea.in{height:auto;min-height:64px;padding:9px 12px;font:13px/19px var(--mo
 #fv-header{height:48px;padding:0 8px;display:flex;align-items:center;gap:6px;background:var(--bg-sidebar);border-bottom:1px solid var(--line);flex:none}
 #fv-header .path{flex:1;min-width:0;font-size:13px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--fg)}
 #fv-toolbar{display:flex;gap:4px;padding:6px 10px;border-bottom:1px solid var(--line);background:var(--bg-subtle);flex:none;overflow-x:auto}
-#fv-toolbar .fbtn{height:32px;padding:0 12px;border-radius:8px;font-size:12px;font-weight:500;color:var(--fg-2);border:1px solid var(--line);background:var(--bg-elevated);white-space:nowrap}
+.fbtn{height:32px;padding:0 12px;border-radius:8px;font-size:12px;font-weight:500;color:var(--fg-2);border:1px solid var(--line);background:var(--bg-elevated);white-space:nowrap;cursor:pointer}
+.fbtn:active{background:var(--bg-hover)}
 #fv-toolbar .fbtn:active{background:var(--bg-hover)}
 #fv-toolbar .fbtn.danger{color:var(--danger)}
 #fv-list{flex:1;overflow-y:auto;padding:6px 8px;padding-bottom:calc(12px + env(safe-area-inset-bottom))}
@@ -551,8 +552,21 @@ textarea.in{height:auto;min-height:64px;padding:9px 12px;font:13px/19px var(--mo
  </div>
 </div>
 <div id="ed-fbrowser">
- <div class="fb-h"><button class="ib" id="ed-fb-up"><svg viewBox="0 0 24 24"><path d="M15 6l-6 6 6 6"/></svg></button><span id="ed-fb-path" style="flex:1;font-family:var(--mono);font-size:13px;overflow:hidden;text-overflow:ellipsis">.</span><button class="ib" id="ed-fb-x"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>
- <div class="fb-list" id="ed-fb-list"></div>
+ <div class="fb-h">
+  <button class="ib" id="ed-fb-up" aria-label="Up"><svg viewBox="0 0 24 24"><path d="M15 6l-6 6 6 6"/></svg></button>
+  <div id="ed-fb-path" style="flex:1;font-family:var(--mono);font-size:13px;overflow:hidden;text-overflow:ellipsis;font-weight:500;color:var(--fg)">.</div>
+  <button class="ib" id="ed-fb-x" aria-label="Close"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+ </div>
+ <div id="ed-fb-crumbs" style="display:flex;flex-wrap:wrap;gap:4px;padding:6px 10px;border-bottom:1px solid var(--line);font-size:12px;background:var(--bg-subtle)"></div>
+ <div id="ed-fb-toolbar" style="display:flex;gap:6px;padding:6px 10px;border-bottom:1px solid var(--line);background:var(--bg-subtle);flex:none;overflow-x:auto;align-items:center">
+  <button class="fbtn" id="ed-fb-new-file">+ File</button>
+  <button class="fbtn" id="ed-fb-mkdir">+ Folder</button>
+  <button class="fbtn" id="ed-fb-sort">Sort: name</button>
+  <button class="fbtn" id="ed-fb-refresh">Refresh</button>
+  <input id="ed-fb-filter" type="search" placeholder="Filter files…" autocomplete="off" spellcheck="false" style="height:32px;min-width:110px;flex:1;max-width:200px;padding:0 10px;border-radius:8px;border:1px solid var(--line);background:var(--bg-elevated);color:var(--fg);font-size:12px">
+ </div>
+ <div id="ed-fb-status" style="font-size:11px;color:var(--fg-3);padding:4px 12px;border-bottom:1px solid var(--line)"></div>
+ <div class="fb-list" id="ed-fb-list" style="flex:1;overflow-y:auto;padding:6px 8px"></div>
 </div>
 <div id="ed-toast"></div>
 
