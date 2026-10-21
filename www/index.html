@@ -445,7 +445,7 @@ textarea.in{height:auto;min-height:64px;padding:9px 12px;font:13px/19px var(--mo
   <div id="pdf-canvas-wrap">
    <div id="pdf-empty">
     <b>PDF workspace</b>
-    <div class="hint">Open any PDF — fillable forms, flat scans, or photos. OCR works without form fields. Tools live in the bar below.</div>
+    <div class="hint">Open any PDF — forms, scans, or photos. Gemma visually inspects documents directly. Tools live in the bar below.</div>
     <button class="btn sm go" id="pdf-empty-open" style="margin-top:4px">Open PDF</button>
    </div>
    <div id="pdf-pages" style="display:none"></div>
@@ -454,7 +454,7 @@ textarea.in{height:auto;min-height:64px;padding:9px 12px;font:13px/19px var(--mo
   <div id="pdf-dock">
    <div class="bar">
     <button class="pbtn" id="pdf-btn-open"><svg viewBox="0 0 24 24"><path d="M3 7a1 1 0 011-1h4.5l1.5 2H20a1 1 0 011 1v9a1 1 0 01-1 1H4a1 1 0 01-1-1V7z"/></svg>Open</button>
-    <button class="pbtn" id="pdf-btn-ocr" disabled><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="6"/><path d="M20 20l-3.5-3.5"/><path d="M9 11h4M11 9v4"/></svg>OCR</button>
+    <button class="pbtn" id="pdf-btn-ocr" disabled><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="6"/><path d="M20 20l-3.5-3.5"/><path d="M9 11h4M11 9v4"/></svg>Inspect</button>
     <button class="pbtn ai" id="pdf-btn-ai" disabled><svg viewBox="0 0 24 24"><path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8L12 3z"/></svg>AI Fill</button>
     <button class="pbtn" id="pdf-btn-fields" disabled><svg viewBox="0 0 24 24"><path d="M9 5h11M9 12h11M9 19h11M5 5v.01M5 12v.01M5 19v.01"/></svg>Fields</button>
     <button class="pbtn" id="pdf-btn-sig" disabled><svg viewBox="0 0 24 24"><path d="M3 17c3-1 5 2 8 0s5-1 8 1"/><path d="M4 21h16"/></svg>Sign</button>
@@ -1813,14 +1813,14 @@ function paneTools(){return`<div class="pane" data-p="tool"><div class="sec">Pho
  <div class="tst" id="vit-m" style="white-space:pre-wrap;font-family:var(--mono);font-size:12px;margin-top:6px"></div>
 
  <div class="sec">Models folder (no copy)</div>
- <div class="note" style="margin:0 0 8px">One GGUF on disk — <b>no second copy</b>. Default: <code>Download/Local Models</code> with subfolders <code>llm</code>, <code>embed</code>, <code>coder</code>, <code>image</code>, <code>ocr</code>, <code>decision</code>. OCR is optional: bind a GGUF to the <b>OCR</b> slot if you have a vision/OCR model; otherwise AI Fill falls back to on-device <b>ML Kit</b>.</div>
+ <div class="note" style="margin:0 0 8px">One GGUF on disk — <b>no duplicate copies</b>. Models are grouped by folder: <code>llm/</code> (Chat & Multimodal Vision), <code>coder/</code> (Monaco Editor), and <code>embed/</code> (Edge Memory).</div>
  <div class="fi"><label>Models folder path</label>
   <div class="r2"><input class="in" id="models-dir-in" autocapitalize="off" spellcheck="false" placeholder="/sdcard/Download/Local Models"><button class="btn sm" id="models-dir-set" style="margin:0">Set</button></div>
  </div>
  <div class="tst" id="models-dir-m"></div>
- <div id="models-list" style="max-height:160px;overflow-y:auto;font-size:13px;margin:8px 0;padding:6px;background:var(--bg-well);border-radius:10px"></div>
+ <div id="models-list" style="max-height:380px;overflow-y:auto;font-size:13px;margin:8px 0;padding:6px;background:var(--bg-well);border-radius:12px;border:1px solid var(--line)"></div>
  <div class="r2" style="flex-wrap:wrap;gap:6px">
-  <button class="btn sm" id="models-refresh">Refresh list</button>
+  <button class="btn sm" id="models-refresh">Refresh folder list</button>
   <button class="btn sm" id="main-pick">Pick file…</button>
  </div>
 
@@ -1885,11 +1885,7 @@ function paneTools(){return`<div class="pane" data-p="tool"><div class="sec">Pho
  </div>
  <div class="tst" id="ext-m-msg"></div>
 
- <div class="sec">OCR engine</div>
- <div class="note" style="margin:0 0 8px">Default is on-device <b>ML Kit</b>. Put a vision GGUF in <code>Local Models/ocr/</code> and press the <b>OCR</b> button on its card (folder alone does not bind). Place a matching <code>*mmproj*.gguf</code> beside it for the vision runner on :8082. Runner starts <b>only on first OCR</b> (not at launch). Opening the code editor stops it. Without mmproj → ML Kit only.</div>
- <div class="set"><div class="lt"><span id="ocr-st">OCR path (optional)</span><small id="ocr-s">not set · using ML Kit</small></div></div>
- <div class="r2" style="margin:4px 0 0"><button class="btn sm dng" id="ocr-del" style="display:none">Unbind OCR</button></div>
- <div class="tst" id="ocr-m"></div>
+
 
  <div class="sec">GitHub Integration</div>
  <div class="fi"><label>Personal Access Token (classic with repo scope)</label><input class="in" type="password" data-k="github.token" data-t="str" placeholder="ghp_..."></div>
@@ -2292,7 +2288,7 @@ const PDF = {
 
   fieldsHTML(){
     if(!this.fields.length)
-      return '<div class="note" style="padding:16px;color:var(--fg-3);line-height:1.45"><b>No AcroForm fields</b> — this is normal for scans and flat PDFs. Use <b>OCR</b> to read text, <b>Text</b>/<b>Sign</b> to write on the page, or <b>AI Fill</b> (OCR layout → stamp). Form-field fill only applies when the PDF was built with fillable fields.</div>';
+      return '<div class="note" style="padding:16px;color:var(--fg-3);line-height:1.45"><b>No AcroForm fields</b> — this is normal for scans and flat PDFs. Use <b>Text</b>/<b>Sign</b> to place entries manually, or <b>AI Fill</b> to let Gemma visually place them for you.</div>';
     return this.fields.map((f,i)=>{
       if(f.checked!==null){
         return `<div class="pdf-field"><label><input type="checkbox" data-fi="${i}" ${f.checked?'checked':''}> ${esc(f.name)}</label></div>`;
@@ -2454,10 +2450,10 @@ const PDF = {
 
   showAiSheet(){
     const nFields = (this.fields||[]).length;
-    const html = `<p style="font-size:12px;color:var(--fg-3);margin:0 0 10px;line-height:1.4">Uses your <b>main chat model</b> on-device. <b>Fillable</b> PDFs → form fields. <b>Scans / flat PDFs</b> → OCR (optional GGUF path if bound, otherwise <b>ML Kit</b>) for layout + table reconstruction, then the model stamps text. OCR GGUF is optional.</p>
+    const html = `<p style="font-size:12px;color:var(--fg-3);margin:0 0 10px;line-height:1.4">Uses your <b>multimodal model</b> on-device. <b>Fillable PDFs</b> → filled directly. <b>Scans & photos</b> → Gemma visually inspects the page layout and stamps text with precision.</p>
 <textarea id="pdf-ai-in" placeholder="e.g. Name Jane Doe, SSN 123-45-6789, date today, check Agree" style="width:100%;min-height:88px;background:var(--bg);border:1px solid var(--line);color:var(--fg);font-size:14px;padding:10px 12px;border-radius:10px;resize:vertical"></textarea>
-<button type="button" id="pdf-ai-run" style="width:100%;margin-top:10px;padding:12px;border-radius:12px;border:0;background:var(--accent);color:var(--on-accent);font-weight:600;font-size:14px;cursor:pointer">${nFields?'Fill form fields':'OCR + AI stamp (non-form)'}</button>
-<div id="pdf-ai-status" style="font-size:11px;color:var(--fg-3);margin-top:8px;font-family:var(--mono)">${nFields? nFields+' AcroForm fields':'No form fields — will OCR pages then place stamps'}</div>`;
+<button type="button" id="pdf-ai-run" style="width:100%;margin-top:10px;padding:12px;border-radius:12px;border:0;background:var(--accent);color:var(--on-accent);font-weight:600;font-size:14px;cursor:pointer">${nFields?'Fill form fields':'Visual AI Fill (Gemma Vision)'}</button>
+<div id="pdf-ai-status" style="font-size:11px;color:var(--fg-3);margin-top:8px;font-family:var(--mono)">${nFields? nFields+' AcroForm fields':'No form fields — Gemma will visually inspect the page and place text stamps'}</div>`;
     this.openSheet('AI Fill', html);
   },
   async runAiFillFromUi(){
@@ -3718,26 +3714,7 @@ function fillExtModels(){
     </div>`;
   }).join('');
 }
-function syncOcrUI(){
-  const s=$('#ocr-s'), st=$('#ocr-st');
-  const path=(NI&&NI.ocr_path)||cfg.ocr_path||'';
-  const ready=NI&&NI.ocr_ready;
-  if(s){
-    if(!path) s.textContent='not set · using ML Kit';
-    else if(ready) s.textContent=path.split('/').pop()+' · vision server :8082 ready';
-    else s.textContent=path.split('/').pop()+' · bound (waiting :8082 or ML Kit fallback)';
-  }
-  if(st) st.textContent='OCR path (optional)';
-  const del=$('#ocr-del');
-  if(del) del.style.display=path?'inline-block':'none';
-  const m=$('#ocr-m');
-  if(m){
-    if(!path) m.textContent='';
-    else m.textContent=ready
-      ? 'Vision OCR live — put mmproj next to the GGUF for images. Line boxes still from ML Kit when available.'
-      : 'Bound → '+path+' — place a matching *mmproj*.gguf beside it, or OCR uses ML Kit.';
-  }
-}
+function syncOcrUI(){}
 /** Reconstruct rough tables / column blocks from OCR line boxes (uses last OCR cache). */
 function reconstructOcrLayout(ocrData){
   if(!ocrData) return {tables:[], structured:''};
@@ -3798,32 +3775,94 @@ function reconstructOcrLayout(ocrData){
 
 async function refreshModelsList(){
   const box=$('#models-list'); if(!box)return;
-  box.innerHTML='<div style="color:var(--fg-3);padding:8px">Loading…</div>';
+  box.innerHTML='<div style="color:var(--fg-3);padding:12px;text-align:center">Scanning folders…</div>';
   try{
-    // Listing only — do not auto_bind/restartServers on every Settings open
+    ninfo();
     const r=JSON.parse(await nat('list_models_dir',{}));
     const models=(r.models)||[];
     if($('#models-dir-in') && r.path) $('#models-dir-in').value=r.path;
-    const subs=(r.subdirs||['llm','embed','coder','image','ocr','decision']).join(', ');
+
     if(!models.length){
-      box.innerHTML=`<div style="color:var(--fg-3);padding:8px;line-height:1.45">No .gguf files yet under <b>${esc(r.path||'Local Models')}</b>.<br>Subfolders ready: <code>${esc(subs)}</code><br>Drop models into the matching folder, then Refresh.<br><span style="opacity:.85">OCR GGUF is optional — bind under OCR slot if you have one; otherwise AI Fill uses ML Kit + your chat model.</span></div>`;
+      box.innerHTML=`<div style="color:var(--fg-3);padding:14px;line-height:1.5;text-align:center">
+        No <code>.gguf</code> models found in <b>${esc(r.path||'Local Models')}</b>.<br>
+        Create or use subfolders:<br>
+        📁 <code>llm/</code> (Chat & Vision) · 📁 <code>coder/</code> · 📁 <code>embed/</code>
+      </div>`;
       return;
     }
-    box.innerHTML=`<div style="font-size:11px;color:var(--fg-3);padding:4px 6px 8px">Subfolders: ${esc(subs)}</div>`+models.map(m=>{
-      const mb=m.mb!=null?Math.round(m.mb)+' MB':Math.round((m.size||0)/1048576)+' MB';
-      const cat=m.category&&m.category!=='root'?` <span style="font-size:10px;padding:1px 6px;border-radius:999px;background:var(--bg-well);color:var(--fg-3)">${esc(m.category)}</span>`:'';
-      return `<div style="display:flex;flex-direction:column;gap:4px;padding:8px 6px;border-bottom:1px solid var(--line)">
-        <div style="font-weight:500;word-break:break-all">${esc(m.name)}${cat} <span style="color:var(--fg-3);font-weight:400">· ${mb}</span></div>
-        <div style="display:flex;flex-wrap:wrap;gap:6px">
-          <button class="btn sm" data-bind-model="chat" data-path="${ea(m.path)}">Chat</button>
-          <button class="btn sm" data-bind-model="coder" data-path="${ea(m.path)}">Coder</button>
-          <button class="btn sm" data-bind-model="emb" data-path="${ea(m.path)}">Embed</button>
-          <button class="btn sm" data-bind-model="ocr" data-path="${ea(m.path)}">OCR</button>
-        </div>
-      </div>`;
-    }).join('');
+
+    const FOLDERS = {
+      llm: { title: 'llm/', desc: 'Chat & Multimodal Vision models (Gemma, Llama)', icon: '💬' },
+      coder: { title: 'coder/', desc: 'Coding models for editor (Qwen Coder)', icon: '⚡' },
+      embed: { title: 'embed/', desc: 'Embedding models for Edge Memory (Nomic)', icon: '🧠' },
+      image: { title: 'image/', desc: 'Vision & Multimodal models', icon: '👁️' },
+      root: { title: 'root /', desc: 'Models in root folder', icon: '📁' }
+    };
+
+    const grouped = {};
+    Object.keys(FOLDERS).forEach(k => grouped[k] = []);
+    models.forEach(m => {
+      const cat = (m.category && FOLDERS[m.category]) ? m.category : 'root';
+      if(!grouped[cat]) grouped[cat] = [];
+      grouped[cat].push(m);
+    });
+
+    let outHtml = '';
+    for(const [catKey, meta] of Object.entries(FOLDERS)){
+      const list = grouped[catKey] || [];
+      if(!list.length && (catKey === 'image' || catKey === 'root')) continue;
+
+      outHtml += `<div style="margin-bottom:12px;background:var(--bg-elevated);border-radius:10px;border:1px solid var(--line);overflow:hidden">
+        <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 10px;background:var(--bg-subtle);border-bottom:1px solid var(--line)">
+          <div style="display:flex;align-items:center;gap:6px">
+            <span>${meta.icon}</span>
+            <b style="font-family:var(--mono);font-size:13px;color:var(--fg)">${meta.title}</b>
+            <small style="color:var(--fg-3);font-size:11px">${meta.desc}</small>
+          </div>
+          <span style="font-size:11px;font-weight:600;color:var(--fg-3);background:var(--bg-well);padding:2px 7px;border-radius:999px">${list.length}</span>
+        </div>`;
+
+      if(!list.length){
+        outHtml += `<div style="padding:10px 12px;font-size:12px;color:var(--fg-3);font-style:italic">Folder empty — drop GGUF files here</div></div>`;
+        continue;
+      }
+
+      outHtml += `<div style="display:flex;flex-direction:column;gap:1px">`;
+      for(const m of list){
+        const mb = m.mb!=null ? (m.mb>=1024?(m.mb/1024).toFixed(2)+' GB':Math.round(m.mb)+' MB') : Math.round((m.size||0)/1048576)+' MB';
+        const isChat = NI && NI.model_path && NI.model_path === m.path;
+        const isCoder = NI && NI.coder_path && NI.coder_path === m.path;
+        const isEmb = NI && NI.emb_path && NI.emb_path === m.path;
+
+        let badges = '';
+        if(isChat) badges += `<span style="font-size:10px;font-weight:600;padding:2px 6px;border-radius:6px;background:rgba(34,197,94,.18);color:var(--success);border:1px solid rgba(34,197,94,.3)">Active Chat</span> `;
+        if(isCoder) badges += `<span style="font-size:10px;font-weight:600;padding:2px 6px;border-radius:6px;background:rgba(94,234,212,.18);color:var(--cyan);border:1px solid rgba(94,234,212,.3)">Active Coder</span> `;
+        if(isEmb) badges += `<span style="font-size:10px;font-weight:600;padding:2px 6px;border-radius:6px;background:rgba(167,139,250,.18);color:var(--violet);border:1px solid rgba(167,139,250,.3)">Active Embed</span> `;
+
+        const chatClass = catKey==='llm' ? 'btn sm go' : 'btn sm';
+        const coderClass = catKey==='coder' ? 'btn sm go' : 'btn sm';
+        const embClass = catKey==='embed' ? 'btn sm go' : 'btn sm';
+
+        outHtml += `<div style="padding:8px 10px;display:flex;flex-direction:column;gap:5px;border-bottom:1px solid var(--line);background:${(isChat||isCoder||isEmb)?'var(--bg-well)':'transparent'}">
+          <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px">
+            <div style="font-size:13px;font-weight:500;word-break:break-all;color:var(--fg)">
+              ${badges}${esc(m.name)}
+            </div>
+            <span style="font-size:11px;color:var(--fg-3);font-family:var(--mono);flex-shrink:0">${mb}</span>
+          </div>
+          <div style="display:flex;gap:6px;flex-wrap:wrap">
+            <button class="${chatClass}" data-bind-model="chat" data-path="${ea(m.path)}" ${isChat?'style="opacity:.6" disabled':''}>${isChat?'✓ Chat':'Set Chat'}</button>
+            <button class="${coderClass}" data-bind-model="coder" data-path="${ea(m.path)}" ${isCoder?'style="opacity:.6" disabled':''}>${isCoder?'✓ Coder':'Set Coder'}</button>
+            <button class="${embClass}" data-bind-model="emb" data-path="${ea(m.path)}" ${isEmb?'style="opacity:.6" disabled':''}>${isEmb?'✓ Embed':'Set Embed'}</button>
+          </div>
+        </div>`;
+      }
+      outHtml += `</div></div>`;
+    }
+
+    box.innerHTML = outHtml;
   }catch(e){
-    box.innerHTML=`<div style="color:var(--danger);padding:8px">${esc(e.message||e)}<br><span style="color:var(--fg-3)">Grant all-files access if needed.</span></div>`;
+    box.innerHTML=`<div style="color:var(--danger);padding:10px">${esc(e.message||e)}</div>`;
   }
 }
 
