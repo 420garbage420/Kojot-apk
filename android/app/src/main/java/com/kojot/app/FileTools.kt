@@ -4,6 +4,8 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 import java.nio.file.Files
+import java.nio.file.StandardCopyOption
+import java.nio.file.attribute.BasicFileAttributes
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -61,7 +63,21 @@ class FileTools(rootDir: File, private val gates: List<String> = emptyList()) {
 
     private fun entryJson(f: File): JSONObject = JSONObject()
         .put("n", f.name).put("p", rel(f)).put("d", f.isDirectory)
-        .put("s", if (f.isDirectory) 0L else f.length()).put("m", dateFmt.format(Date(f.lastModified())))
+        .put("s", if (f.isDirectory) 0L else f.length()).put("m", dateFmt.format(Date(f.lastModified()))).put("mt", f.lastModified())
+
+    /** One stat per file (not one per sort comparison): attributes are read once and reused for sorting + output. */
+    private class Ent(val f: File, val dir: Boolean, val size: Long, val mt: Long, val lname: String)
+    private fun ent(f: File): Ent = try {
+        val at = Files.readAttributes(f.toPath(), BasicFileAttributes::class.java)
+        Ent(f, at.isDirectory, if (at.isDirectory) 0L else at.size(), at.lastModifiedTime().toMillis(), f.name.lowercase())
+    } catch (e: Exception) {
+        val d = f.isDirectory
+        Ent(f, d, if (d) 0L else f.length(), f.lastModified(), f.name.lowercase())
+    }
+    private fun entryJson(e: Ent): JSONObject = JSONObject()
+        .put("n", e.f.name).put("p", rel(e.f)).put("d", e.dir).put("s", e.size).put("m", dateFmt.format(Date(e.mt))).put("mt", e.mt)
+    private fun entryLine(e: Ent): String =
+        if (e.dir) "[dir]  ${e.f.name}/" else "[file] ${e.f.name}  ${sz(e.size)}  ${dateFmt.format(Date(e.mt))}"
 
     private fun entryLine(f: File): String =
         // Avoid listFiles() per dir entry (N+1 FUSE scans) — viewer uses JSON entries only
@@ -78,11 +94,11 @@ class FileTools(rootDir: File, private val gates: List<String> = emptyList()) {
         val limit = a.optInt("limit", 200).coerceIn(1, 5000)
         val off = a.optInt("offset", 0).coerceAtLeast(0)
         val hidden = a.optBoolean("hidden", false)
-        val kids = (d.listFiles() ?: throw ToolError("cannot read ${rel(d)}")).filter { hidden || !it.name.startsWith(".") }
+        val kids = (d.listFiles() ?: throw ToolError("cannot read ${rel(d)}")).filter { hidden || !it.name.startsWith(".") }.map { ent(it) }
         val sorted = when (a.optString("sort", "name")) {
-            "size" -> kids.sortedByDescending { if (it.isDirectory) -1L else it.length() }
-            "date" -> kids.sortedByDescending { it.lastModified() }
-            else -> kids.sortedWith(compareBy({ !it.isDirectory }, { it.name.lowercase() }))
+            "size" -> kids.sortedByDescending { if (it.dir) -1L else it.size }
+            "date" -> kids.sortedByDescending { it.mt }
+            else -> kids.sortedWith(compareBy<Ent>({ !it.dir }, { it.lname }))
         }
         val page = sorted.drop(off).take(limit)
         val more = sorted.size - off - page.size
@@ -137,7 +153,7 @@ class FileTools(rootDir: File, private val gates: List<String> = emptyList()) {
                         return result("${rel(f)} is a binary file (${sz(f.length())}); not shown.")
                             .put("data", JSONObject().put("binary", true).put("size", f.length()))
                     }
-                    return result(String(bytes, Charsets.UTF_8))
+                    return result(String(bytes, Charsets.UTF_8), JSONObject().put("mtime", f.lastModified()).put("size", f.length()))
                 }
                 val max = a.optInt("max_chars", 3000).coerceIn(200, 8000)
         val offset = a.optLong("offset", 0L).coerceAtLeast(0L)
@@ -265,9 +281,84 @@ class FileTools(rootDir: File, private val gates: List<String> = emptyList()) {
         val f = safe(path)
         if (f == root || rel(f) == ".git") throw ToolError("refused: will not write to ${rel(f)}")
         if (f.exists() && !overwrite) throw ToolError("refused: ${rel(f)} already exists (set overwrite=true to replace)")
+        // Optional optimistic-concurrency guard: the editor passes the mtime it last saw.
+        val expect = a.optLong("expect_mtime", 0L)
+        if (expect > 0L && f.exists() && f.lastModified() != expect)
+            throw ToolError("CONFLICT: ${rel(f)} changed on disk since it was opened (another app or the AI agent)")
         f.parentFile?.mkdirs()
-        f.writeText(content, Charsets.UTF_8)
-        return result("wrote ${sz(f.length())} to ${rel(f)}")
+        atomicWrite(f, content)
+        return result("wrote ${sz(f.length())} to ${rel(f)}", JSONObject().put("mtime", f.lastModified()).put("size", f.length()))
+    }
+
+    /** Write to a temp file in the same folder, then rename over the target, so a kill mid-write can't truncate the user's file. */
+    private fun atomicWrite(f: File, content: String) {
+        val tmp = File(f.parentFile, ".${f.name}.kojot-tmp")
+        try {
+            tmp.writeText(content, Charsets.UTF_8)
+            try {
+                Files.move(tmp.toPath(), f.toPath(), StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE)
+            } catch (e: Exception) {
+                Files.move(tmp.toPath(), f.toPath(), StandardCopyOption.REPLACE_EXISTING)
+            }
+        } catch (e: Exception) {
+            tmp.delete()
+            f.writeText(content, Charsets.UTF_8)
+        }
+    }
+
+    fun stat(a: JSONObject): JSONObject {
+        val f = safe(a.optString("path"))
+        if (!f.exists()) throw ToolError("not found: ${rel(f)}")
+        return result(rel(f), JSONObject().put("mtime", f.lastModified()).put("size", if (f.isDirectory) 0L else f.length()).put("dir", f.isDirectory))
+    }
+
+    /** Project-wide plain-text search (case-insensitive substring). Skips hidden/vendor dirs, big/binary files and gated paths. */
+    fun searchText(a: JSONObject): JSONObject {
+        val q = a.optString("query").trim()
+        if (q.isEmpty()) throw ToolError("query is required")
+        val base = safe(a.optString("path", "."))
+        if (!base.isDirectory) throw ToolError("not a directory: ${rel(base)}")
+        val max = a.optInt("max", 80).coerceIn(1, 300)
+        val maxDepth = a.optInt("depth", 10).coerceIn(1, 20)
+        val skipDirs = setOf("node_modules", "build", "vs", "__pycache__")
+        val hits = JSONArray()
+        var scanned = 0
+        fun walk(d: File, depth: Int) {
+            val kids = d.listFiles() ?: return
+            for (k in kids) {
+                if (hits.length() >= max || scanned > 5000) return
+                if (k.name.startsWith(".") || k.name in skipDirs) continue
+                val r = rel(k)
+                if (isGated(r)) continue
+                if (k.isDirectory) {
+                    if (depth < maxDepth && !Files.isSymbolicLink(k.toPath())) walk(k, depth + 1)
+                    continue
+                }
+                if (k.length() > 1_000_000L) continue
+                scanned++
+                try {
+                    val head = ByteArray(512)
+                    val n = k.inputStream().use { it.read(head) }
+                    if ((0 until maxOf(n, 0)).any { head[it].toInt() == 0 }) continue
+                    k.bufferedReader(Charsets.UTF_8).use { rd ->
+                        var ln = 0
+                        while (true) {
+                            val line = rd.readLine() ?: break
+                            ln++
+                            if (line.contains(q, ignoreCase = true)) {
+                                hits.put(JSONObject().put("p", r).put("l", ln).put("t", line.trim().take(160)))
+                                if (hits.length() >= max) break
+                            }
+                        }
+                    }
+                } catch (e: Exception) { /* unreadable file: skip */ }
+            }
+        }
+        walk(base, 1)
+        val text = StringBuilder("${hits.length()} hit(s) for \"$q\" under ${rel(base)}\n")
+        for (i in 0 until hits.length()) { val h = hits.getJSONObject(i); text.append("${h.getString("p")}:${h.getInt("l")}: ${h.getString("t")}\n") }
+        if (hits.length() >= max) text.append("(stopped at $max results — narrow the query)")
+        return result(text.toString().trim(), JSONObject().put("hits", hits).put("total", hits.length()))
     }
 
     fun edit(a: JSONObject): JSONObject {
@@ -295,13 +386,13 @@ class FileTools(rootDir: File, private val gates: List<String> = emptyList()) {
                 throw ToolError("search block not found in ${rel(f)}")
             val normReplace = replace.replace("\r\n", "\n")
             val updated = normRaw.replaceFirst(normSearch, normReplace)
-            f.writeText(updated, Charsets.UTF_8)
+            atomicWrite(f, updated)
             return result("edited ${rel(f)} (applied with normalized line endings)")
         }
         if (count > 1)
             throw ToolError("search block appears $count times; provide more surrounding lines")
         val updated = raw.replaceFirst(search, replace)
-        f.writeText(updated, Charsets.UTF_8)
+        atomicWrite(f, updated)
         return result("edited ${rel(f)} (replaced 1 block)")
     }
 
@@ -333,6 +424,8 @@ class FileTools(rootDir: File, private val gates: List<String> = emptyList()) {
         "rename" -> rename(a)
         "write_file" -> write(a)
         "edit_file" -> edit(a)
+        "stat" -> stat(a)
+        "search_text" -> searchText(a)
         else -> throw ToolError("unknown tool: $op")
     }
 }

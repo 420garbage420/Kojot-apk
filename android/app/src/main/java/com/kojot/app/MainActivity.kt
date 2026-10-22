@@ -16,6 +16,9 @@ import android.util.Log
 import android.view.Gravity
 import android.view.View
 import android.webkit.JavascriptInterface
+import android.webkit.ConsoleMessage
+import android.webkit.ValueCallback
+import android.webkit.WebChromeClient
 import android.webkit.WebResourceRequest
 import android.webkit.WebView
 import android.webkit.WebViewClient
@@ -72,6 +75,8 @@ class MainActivity : Activity() {
         } catch (_: Exception) { "root" }
     }
     private var memory: MemoryTools? = null
+    private var fileCb: ValueCallback<Array<Uri>>? = null
+    @Volatile private var lastEmbProbe = 0L
 
     private var wakeLock: PowerManager.WakeLock? = null
     private fun acquireWakeLock(tag: String = "kojot:work", ms: Long = 60 * 60 * 1000L) {
@@ -187,6 +192,24 @@ class MainActivity : Activity() {
             settings.allowUniversalAccessFromFileURLs = false
             settings.mixedContentMode = android.webkit.WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
             setBackgroundColor(0xFF202020.toInt()); visibility = View.GONE
+            // Without a WebChromeClient, <input type="file"> (vision image attach) silently does nothing.
+            webChromeClient = object : WebChromeClient() {
+                override fun onShowFileChooser(
+                    v: WebView, cb: ValueCallback<Array<Uri>>, params: FileChooserParams
+                ): Boolean {
+                    fileCb?.onReceiveValue(null)
+                    fileCb = cb
+                    return try {
+                        @Suppress("DEPRECATION")
+                        startActivityForResult(params.createIntent(), REQ_FILE)
+                        true
+                    } catch (_: Exception) { fileCb = null; false }
+                }
+                override fun onConsoleMessage(m: ConsoleMessage): Boolean {
+                    Log.d("KojotJS", "${m.messageLevel()} ${m.sourceId()}:${m.lineNumber()} ${m.message()}")
+                    return true
+                }
+            }
             webViewClient = object : WebViewClient() {
                 override fun shouldOverrideUrlLoading(v: WebView, r: WebResourceRequest): Boolean {
                     val u = r.url
@@ -407,7 +430,10 @@ class MainActivity : Activity() {
         val index = File(www, "index.html")
         val hasWww = try { (assets.list("www") ?: emptyArray()).isNotEmpty() } catch (_: Exception) { false }
         // Refresh when missing, or when packaged index is newer/different size
-        val needCopy = !index.isFile || run {
+        val updated = try { packageManager.getPackageInfo(packageName, 0).lastUpdateTime } catch (_: Exception) { 0L }
+        val prefs = getSharedPreferences("kojot_www", MODE_PRIVATE)
+        val stale = prefs.getLong("stamp", -1L) != updated
+        val needCopy = stale || !index.isFile || run {
             try {
                 val assetLen = assets.open("www/index.html").use { it.available().toLong() }
                 index.length() != assetLen
@@ -422,6 +448,7 @@ class MainActivity : Activity() {
         if (hasWww) {
             // Overlay copy (do not delete vs/ mid-flight)
             copyAssetDir("www", www)
+            prefs.edit().putLong("stamp", updated).apply()
         } else {
             try {
                 assets.open("index.html").use { i -> File(www, "index.html").outputStream().use { i.copyTo(it) } }
@@ -604,6 +631,11 @@ class MainActivity : Activity() {
 
     @Deprecated("plain Activity keeps this dependency-free")
     override fun onActivityResult(r: Int, c: Int, d: Intent?) {
+        if (r == REQ_FILE) {
+            fileCb?.onReceiveValue(WebChromeClient.FileChooserParams.parseResult(c, d))
+            fileCb = null
+            return
+        }
         if (c != RESULT_OK || d?.data == null) {
             if (r == REQ_MODEL) msg.text = "No file chosen. Tap to try again."
             return
@@ -1106,7 +1138,12 @@ class MainActivity : Activity() {
 
         @JavascriptInterface
         fun info(): String {
-            memory?.checkEmbedding()
+            // Throttled, off-thread: info() is a synchronous call from JS and must return instantly.
+            val now = System.currentTimeMillis()
+            if (now - lastEmbProbe > 4000) {
+                lastEmbProbe = now
+                thread { try { memory?.checkEmbedding() } catch (_: Exception) {} }
+            }
             val m = modelFile()
             val coder = coderModelFile()
             val emb = embModelFile()
@@ -1175,5 +1212,6 @@ class MainActivity : Activity() {
         private const val REQ_MODEL = 1
         private const val REQ_EMB = 2
         private const val REQ_CODER = 3
+        private const val REQ_FILE = 4
     }
 }
