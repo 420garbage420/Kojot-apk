@@ -546,6 +546,12 @@ class LlamaService : Service() {
         val defaultCtx = if (activeSlot == "coder") 8192 else 8192
         num("ctx", "-c", defaultCtx); num("threads", "-t", 4); num("threads_batch", "-tb", 0)
         num("batch", "-b", 0); num("ubatch", "-ub", 0); num("parallel", "-np", 1)
+        // GPU layer offload (-ngl). Only useful when libllama_server.so was built with Vulkan/OpenCL.
+        // 0 / unset = CPU only (safe default for pure-NEON builds).
+        run {
+            val ngl = s.optInt("gpu_layers", 0)
+            if (ngl > 0) { a.add("-ngl"); a.add(ngl.toString()) }
+        }
         // Flash attention + q8_0 K/V cache by default: roughly half the KV memory at near-identical quality.
         // A quantized V cache REQUIRES flash attention, so FA is forced on whenever V is quantized.
         // Anything set explicitly in Settings (even "off"/"f16") wins over these defaults.

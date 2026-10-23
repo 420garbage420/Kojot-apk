@@ -28,7 +28,7 @@ svg{display:block;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:
 .sb-head{display:flex;align-items:center;justify-content:space-between;height:44px;padding-inline:8px 0}
 .brand{font-size:17px;font-weight:600;letter-spacing:-.3px}.brand small{font-size:13px;font-weight:500;color:var(--fg-2);margin-inline-start:2px}
 .ib{display:inline-flex;align-items:center;justify-content:center;width:40px;height:40px;border-radius:10px;color:var(--fg-2);transition:background .15s var(--ease),color .15s}
-.ib:hover,.ib:active{background:var(--bg-hover);color:var(--fg)}.ib svg{width:20px;height:20px}
+.ib:hover,.ib:active{background:var(--bg-hover);color:var(--fg)}.ib svg{width:20px;height:20px;stroke:currentColor;fill:none;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
 .nav{display:flex;flex-direction:column;gap:2px;margin-top:12px}
 .row{display:flex;align-items:center;gap:10px;width:100%;height:40px;padding:0 10px;border-radius:10px;font-size:14px;text-align:start;white-space:nowrap;transition:background .15s var(--ease)}
 .row:hover,.row:active{background:var(--bg-hover)}.row.sel{background:var(--bg-well)}.row svg{width:18px;height:18px;flex:none}
@@ -437,6 +437,25 @@ textarea.in{height:auto;min-height:64px;padding:9px 12px;font:13px/19px var(--mo
 #ed-toast .t.help{pointer-events:auto;text-align:left;max-width:min(94%,440px);padding:11px 14px;font-size:13px;line-height:19px;border-color:var(--gold)}
 #ed-toast .t.help b{display:block;margin-bottom:3px;font-weight:600;color:var(--gold)}
 .pdf-pg{background:#fff;box-shadow:0 2px 16px rgba(0,0,0,.55);border-radius:2px;overflow:hidden;position:relative}.pdf-pg canvas{display:block;box-shadow:none;max-width:100%;height:auto}
+
+/* condenser + file viewer polish */
+.top .ib.condense{width:auto;padding:0 10px;gap:6px;font-size:12px;font-weight:600;color:var(--fg-2)}
+.top .ib.condense svg{width:16px;height:16px}
+.top .ib.condense:disabled{opacity:.4}
+.fv-toolbar{display:flex;flex-wrap:wrap;gap:6px;padding:8px 10px;border-bottom:1px solid var(--line);align-items:center}
+.fv-toolbar .fbtn{height:32px;padding:0 10px;border-radius:8px;border:1px solid var(--line);background:var(--bg-elevated);color:var(--fg-2);font-size:12px;font-weight:500}
+.fv-toolbar .fbtn.on{background:var(--bg-hover);color:var(--fg);border-color:var(--line-strong)}
+.fv-toolbar .fbtn:disabled{opacity:.4}
+.fv-filter-row{display:flex;gap:6px;padding:6px 10px;border-bottom:1px solid var(--line);align-items:center}
+.fv-filter-row input{flex:1;height:34px;padding:0 10px;border-radius:8px;border:1px solid var(--line);background:var(--bg-elevated);color:var(--fg);font-size:13px}
+.fv-chips{display:flex;gap:4px;overflow-x:auto;padding:0 2px}
+.fv-chips button{flex:none;height:28px;padding:0 10px;border-radius:999px;border:1px solid var(--line);background:transparent;color:var(--fg-3);font-size:11px;font-weight:600}
+.fv-chips button.on{background:var(--bg-hover);color:var(--fg);border-color:var(--line-strong)}
+.fv-list.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(96px,1fr));gap:8px;padding:10px}
+.fv-list.grid .fv-row{flex-direction:column;align-items:stretch;text-align:center;padding:12px 8px;border-radius:12px;border:1px solid var(--line);min-height:96px}
+.fv-list.grid .fv-row .meta{display:none}
+.fv-list.grid .fv-row .ico{margin:0 auto 6px}
+.fv-crumb{color:var(--fg-3);cursor:pointer}.fv-crumb:hover{color:var(--link)}.fv-crumb.cur{color:var(--fg);cursor:default}
 </style>
 </head>
 <body>
@@ -458,6 +477,7 @@ textarea.in{height:auto;min-height:64px;padding:9px 12px;font:13px/19px var(--mo
   <header class="top">
    <button class="ib mb" id="mn" aria-label="Menu"><svg viewBox="0 0 24 24"><path d="M4 7h16M4 12h10M4 17h16"/></svg></button>
    <div class="pill"><i id="dot" class="wait"></i><span id="ttl">Kojot</span><em id="sub"></em></div>
+   <button class="ib condense" id="btn-condense" aria-label="Condense context" title="Summarize this chat and continue with a compact context">Condense</button>
    <button class="ib" id="ed-toggle" aria-label="Code Editor" title="Code Editor"><svg viewBox="0 0 24 24"><path d="M8 6l-5 6 5 6M16 6l5 6-5 6M14 4l-4 16"/></svg></button>
    <button class="ib" id="pdf-toggle" aria-label="PDF" title="PDF Forms"><svg viewBox="0 0 24 24"><path d="M14 3H7a2 2 0 00-2 2v14a2 2 0 002 2h10a2 2 0 002-2V8zM14 3v5h5"/></svg></button>
    <button class="ib" id="nw2" aria-label="New chat"><svg viewBox="0 0 24 24"><path d="M12 20h9M16.5 3.5a2.1 2.1 0 013 3L7 19l-4 1 1-4z"/></svg></button>
@@ -628,6 +648,16 @@ textarea.in{height:auto;min-height:64px;padding:9px 12px;font:13px/19px var(--mo
   <button class="fbtn" id="fv-embed" disabled title="Embed selected into memory">Embed</button>
   <button class="fbtn" id="fv-home">Root</button>
   <input id="fv-filter" type="search" placeholder="Filter files…" autocomplete="off" spellcheck="false" style="height:32px;min-width:120px;flex:1;max-width:200px;padding:0 10px;border-radius:8px;border:1px solid var(--line);background:var(--bg-elevated);color:var(--fg);font-size:12px">
+  <button class="fbtn" id="fv-grid" title="Toggle grid / list">Grid</button>
+ </div>
+ <div class="fv-chips" id="fv-typechips">
+  <button type="button" data-ft="all" class="on">All</button>
+  <button type="button" data-ft="dir">Folders</button>
+  <button type="button" data-ft="code">Code</button>
+  <button type="button" data-ft="doc">Docs</button>
+  <button type="button" data-ft="img">Images</button>
+  <button type="button" data-ft="model">Models</button>
+  <button type="button" data-ft="web">Web cache</button>
  </div>
  <div id="fv-status" style="font-size:11px;color:var(--fg-3);padding:4px 12px;border-bottom:1px solid var(--line)"></div>
  <div id="fv-list"></div>
@@ -677,13 +707,103 @@ const I={copy:'<svg viewBox="0 0 24 24"><rect x="9" y="9" width="11" height="11"
 
 /* strip junk only: zero-width, ANSI, nulls, excess blank lines — never rewrite meaning */
 function scrubJunk(s){
-  return String(s??"")
-    .replace(/\u0000/g,"")
-    .replace(/[\u200B-\u200D\uFEFF]/g,"")
-    .replace(/\x1B\[[0-9;]*[A-Za-z]/g,"")
-    .replace(/\r\n/g,"\n").replace(/\r/g,"\n")
-    .replace(/[ \t]+$/gm,"")
-    .replace(/\n{3,}/g,"\n\n");
+  let t=String(s??"");
+  // nulls, zero-width, bidi controls, ANSI
+  t=t.replace(/\u0000/g,"")
+     .replace(/[\u200B-\u200D\uFEFF\u202A-\u202E\u2066-\u2069]/g,"")
+     .replace(/\x1B\[[0-9;]*[A-Za-z]/g,"")
+     .replace(/\r\n/g,"\n").replace(/\r/g,"\n");
+  // collapse pure-noise base64 / hex dumps that blow the context
+  t=t.replace(/(?:[A-Za-z0-9+/]{80,}={0,2}\s*){3,}/g, m => {
+    const n=m.replace(/\s+/g,"").length;
+    return `[base64 omitted · ${n} chars]`;
+  });
+  t=t.replace(/(?:[0-9a-fA-F]{2}[\s:]?){40,}/g, m => {
+    const n=m.replace(/[\s:]/g,"").length;
+    return `[hex dump omitted · ${n/2|0} bytes]`;
+  });
+  // strip data-URI payloads but keep the mime hint
+  t=t.replace(/data:([a-z0-9.+/-]+);base64,[A-Za-z0-9+/=]{40,}/gi,(_,mime)=>`data:${mime};base64,[omitted]`);
+  // collapse long runs of identical lines (log spam)
+  t=t.replace(/((?:^.*\n)\1{4,})/gm, m=>{
+    const line=m.split("\n")[0]; const n=m.trimEnd().split("\n").length;
+    return line+`\n[… repeated ${n}× …]\n`;
+  });
+  t=t.replace(/[ \t]+$/gm,"").replace(/\n{3,}/g,"\n\n");
+  return t;
+}
+
+
+/** Build a compact, high-signal summary of the current chat and start a fresh
+ *  conversation that carries only that summary as context. Uses the local model. */
+async function condenseChat(){
+  const c = chats.find(x=>x.id===active);
+  if(!c || !c.messages || c.messages.length<2){ toast('Nothing to condense yet'); return; }
+  const btn = $('#btn-condense');
+  if(btn){ btn.disabled = true; btn.textContent = '…'; }
+  try{
+    // Prefer already-scrubbed, condensed tool results for older turns
+    const parts = [];
+    for(const m of c.messages){
+      if(m.role==='user'){
+        parts.push('User: '+scrubJunk(String(m.content||'')).slice(0,1200));
+      }else if(m.role==='assistant'){
+        let body = scrubJunk(String(m.content||'')).slice(0,1500);
+        if(m.calls && m.calls.length){
+          const tools = m.calls.map(k=>'- '+k.name+': '+scrubJunk(condenseTool(k))).join('\n');
+          body = (body?body+'\n':'')+tools;
+        }
+        parts.push('Assistant:\n'+body);
+      }
+    }
+    let transcript = parts.join('\n\n');
+    // Cap transcript fed to the summarizer
+    if(transcript.length>14000) transcript = transcript.slice(0,6000)+'\n\n[…middle omitted…]\n\n'+transcript.slice(-6000);
+
+    const sys = 'You are a context condenser. Produce a dense handoff brief for a fresh chat. Keep: the user goal, decisions made, file paths / URLs that matter, open questions, and the next concrete step. Drop chit-chat, repeated tool noise, and failed dead-ends. Use short bullets. No preamble.';
+    const body = {
+      stream:false,
+      temperature:0.2,
+      max_tokens:900,
+      messages:[
+        {role:'system', content:sys},
+        {role:'user', content:'Condense this conversation into a handoff brief:\n\n'+transcript}
+      ]
+    };
+    const r = await fetch(cfg.url.replace(/\/$/,'')+'/v1/chat/completions',{
+      method:'POST', headers:{'Content-Type':'application/json'},
+      signal:AbortSignal.timeout(120000),
+      body:J.stringify(body)
+    });
+    if(!r.ok) throw Error('Summarizer HTTP '+r.status);
+    const j = await r.json();
+    let summary = (j.choices&&j.choices[0]&&j.choices[0].message&&j.choices[0].message.content)||'';
+    summary = scrubJunk(summary).trim();
+    if(!summary) throw Error('Empty summary');
+
+    const title = (c.title||'Chat').replace(/\s*\(condensed\)\s*/i,'').slice(0,48)+' (condensed)';
+    const nc = {
+      id: 'c'+Date.now().toString(36),
+      title,
+      created: Date.now(),
+      messages: [
+        {role:'user', content:'[Context condensed from previous chat]\n\n'+summary},
+        {role:'assistant', content:'Got it — I have the condensed context. What should we do next?'}
+      ]
+    };
+    chats.unshift(nc);
+    // Optionally archive the old chat title
+    c.title = (c.title||'Chat') + ' · archived';
+    active = nc.id;
+    saveChats();
+    renderHist();
+    renderMsgs();
+    toast('Context condensed into a new chat');
+  }catch(e){
+    toast('Condense failed: '+(e.message||e));
+  }finally{
+    if(btn){ btn.disabled = false; btn.textContent = 'Condense'; }
+  }
 }
 
 /* Myers line diff (zero-dep) for edit_file tool cards */
@@ -1024,7 +1144,12 @@ const searchReady=()=>{const key=cfg.search.prov==='direct'?'ddg':cfg.search.pro
 function tools(){
   const t=[];
   if(cfg.files&&NI)t.push(...FT);
-  try{t.push(fn('identify_model','Identify the exact local GGUF (metadata + filename) and look it up on Hugging Face. Returns architecture, HF repo candidates, and recommended Power-user sampling. Set apply_preset=true to load recommendations; save_profile=true to store them for this model path.',{path:S('Optional GGUF path (default: bound chat model)'),name:S('Optional file name hint'),apply_preset:B('Apply recommended sampling to Power settings'),save_profile:B('Save profile for this model path')}));}catch(_){}
+  try{t.push(fn('identify_model','Identify the exact local GGUF (metadata + filename) and look it up on Hugging Face. Returns architecture, HF repo candidates, and recommended Power-user sampling. Set apply_preset=true to load recommendations; save_profile=true to store them for this model path.',{path:S('Optional GGUF path (default: bound chat model)'),name:S('Optional file name hint'),apply_preset:B('Apply recommended sampling to Power settings'),save_profile:B('Save profile for this model path')}));
+  t.push(fn('list_model_profiles','List saved Power-user profiles keyed by model path. Use before update_model_profile.',{}));
+  t.push(fn('get_model_profile','Read one saved profile (sampling + server notes) by model path.',{path:S('Model path key as returned by list_model_profiles')},['path']));
+  t.push(fn('update_model_profile','Create or patch a saved profile. Pass sampling fields (t, m, top_k, top_p, min_p, repeat_penalty, …) and optional note. Merges with existing profile. Use after researching the model with web_search.',{path:S('Model path key'),note:S('Optional profile note'),t:Nn('Temperature'),m:Nn('Max tokens'),top_k:Nn('Top-K'),top_p:Nn('Top-P'),min_p:Nn('Min-P'),repeat_penalty:Nn('Repeat penalty'),extra:S('JSON object of additional sampler fields merged into p')},['path']));
+  t.push(fn('apply_model_profile','Load a saved profile into the active Power settings (chat sampling).',{path:S('Model path key')},['path']));
+}catch(_){}
   if(cfg.search.on){if(searchReady()||cfg.search.prov==='direct'||cfg.search.prov==='ddg'){t.push(WT)}t.push(WT_WEB);t.push(WT_MAP);t.push(WT_FETCH)}
   if(typeof GHT!=="undefined"&&cfg.github?.token?.trim())t.push(...GHT);
   if(typeof FORGE_TOOLS!=="undefined")t.push(...FORGE_TOOLS);
@@ -2223,11 +2348,68 @@ async function execCustomTool(tool, args){
   };
 }
 
+
+async function toolListModelProfiles(){
+  cfg.model_profiles=cfg.model_profiles||{};
+  const keys=Object.keys(cfg.model_profiles);
+  if(!keys.length)return{text:'No saved model profiles.',data:{profiles:[]}};
+  const rows=keys.map(path=>{
+    const pr=cfg.model_profiles[path]||{};
+    const id=pr.identity||{};
+    return{path,name:path.split('/').pop(),family:id.family||'',hf:id.hf||'',note:id.note||pr.note||'',t:pr.t,m:pr.m,top_p:pr.p&&pr.p.top_p,active:cfg.model_profile_key===path};
+  });
+  const text=rows.map((r,i)=>`${i+1}. ${r.name}${r.active?' [active]':''}\n   path: ${r.path}\n   ${r.family||'?'}${r.hf?' · '+r.hf:''} · temp ${r.t??'—'} · max ${r.m??'—'} · top_p ${r.top_p??'—'}\n   ${r.note||''}`).join('\n\n');
+  return{text:`${rows.length} profile(s):\n\n${text}`,data:{profiles:rows}};
+}
+async function toolGetModelProfile(a){
+  const path=String(a.path||'').trim();
+  if(!path)throw Error('path is required');
+  cfg.model_profiles=cfg.model_profiles||{};
+  const pr=cfg.model_profiles[path];
+  if(!pr)throw Error('No profile for '+path+' — call list_model_profiles');
+  return{text:J.stringify(pr,null,2),data:{path,profile:pr}};
+}
+async function toolUpdateModelProfile(a){
+  const path=String(a.path||'').trim();
+  if(!path)throw Error('path is required');
+  cfg.model_profiles=cfg.model_profiles||{};
+  const pr=cfg.model_profiles[path]||{p:{},identity:{}};
+  pr.p=pr.p||{}; pr.identity=pr.identity||{};
+  if(a.note!=null&&String(a.note).trim()){pr.identity.note=String(a.note).trim(); pr.note=pr.identity.note}
+  if(a.t!=null&&a.t!=='')pr.t=+a.t;
+  if(a.m!=null&&a.m!=='')pr.m=+a.m;
+  for(const k of ['top_k','top_p','min_p','repeat_penalty','repeat_last_n','presence_penalty','frequency_penalty','typical_p','mirostat','mirostat_tau','mirostat_eta','dry_multiplier','dry_base','xtc_probability','xtc_threshold','temperature']){
+    if(a[k]!=null&&a[k]!=='')pr.p[k]=+a[k];
+  }
+  if(a.extra){
+    try{const x=typeof a.extra==='string'?J.parse(a.extra):a.extra; if(x&&typeof x==='object')Object.assign(pr.p,x)}catch(e){throw Error('extra must be JSON object: '+e.message)}
+  }
+  cfg.model_profiles[path]=pr;
+  saveCfg();
+  try{renderProfileList()}catch(_){}
+  return{text:`Updated profile for ${path.split('/').pop()}\n`+J.stringify({t:pr.t,m:pr.m,p:pr.p,note:pr.identity.note},null,2),data:{path,profile:pr}};
+}
+async function toolApplyModelProfile(a){
+  const path=String(a.path||'').trim();
+  if(!path)throw Error('path is required');
+  cfg.model_profiles=cfg.model_profiles||{};
+  const pr=cfg.model_profiles[path];
+  if(!pr)throw Error('No profile for '+path);
+  applyPowerProfile(pr);
+  cfg.model_profile_key=path;
+  saveCfg();
+  return{text:`Applied profile ${path.split('/').pop()} to Power settings (temp=${cfg.t}, max=${cfg.m}).`,data:{path,t:cfg.t,m:cfg.m,p:cfg.p}};
+}
+
 async function runTool(k){
   const cached=Cap.getCached(k.name,k.args);
   if(cached)return{...cached,_cached:true};
   let out;
   if(k.name==='identify_model')out=await toolIdentifyModel(k.args);
+  else if(k.name==='list_model_profiles')out=await toolListModelProfiles(k.args);
+  else if(k.name==='get_model_profile')out=await toolGetModelProfile(k.args);
+  else if(k.name==='update_model_profile')out=await toolUpdateModelProfile(k.args);
+  else if(k.name==='apply_model_profile')out=await toolApplyModelProfile(k.args);
   else if(k.name==='web_search')out=await webSearch(k.args.query,k.args.max_results);
   else if(k.name==='fetch_page')out=await fetchPages(k.args.urls);
   else if(k.name==='fetch_web')out=await fetchWebPage(k.args.url,{max_chars:k.args.max_chars});
@@ -2460,6 +2642,9 @@ xj:"Extra JSON merged into every request and applied last. Use it for server-spe
 ctx:"How many tokens of conversation the model can hold at once. Bigger means longer chats but more RAM. With the q8 KV cache now on by default, 16384 costs roughly what 8192 used to. Needs a server restart.",
 threads:"CPU threads used while writing the reply. Around 4–6 is the sweet spot; generation is memory-bound, so more threads can slow the UI without speeding up replies.",
 threads_batch:"CPU threads used while reading your prompt. Can be higher than Threads because prompt reading is compute-bound. Blank = same as Threads.",
+gpu_layers:"How many transformer layers to run on the GPU (-ngl). Requires a llama-server binary built with Vulkan or OpenCL. 0 keeps everything on CPU. Start low (8–20) on mobile.",
+cpu_affinity:"On big.LITTLE chips, pinning llama-server to Performance cores (taskset) reduces cross-cluster migration and can raise tokens/sec. Use Termux or a wrapper script; the app passes -t/-tb only.",
+
 batch:"How many prompt tokens are processed per step. Larger reads prompts faster but uses more memory. 2048 is the default.",
 ubatch:"The physical micro-batch inside each batch. Lower saves memory; 512 is the default.",
 parallel:"How many chats the server handles at once. Each slot splits the context, so leave this at 1 on a phone.",
@@ -2522,7 +2707,7 @@ function powerHTML(){return`<div class="pane" data-p="pow">
  grp('XTC','exclude top choices',num('xtc_probability','Probability','Chance to apply per token. 0 = off.','0',0,1,.01)+num('xtc_threshold','Threshold','Tokens above this are candidates to cut.','0.1',0,1,.01))+
  grp('Output','stops, order, constraints',area('stop','Stop strings','One per line.','###','p',2)+txt('samplers','Sampler order','Separated by ; e.g. top_k;top_p;min_p;temperature','top_k;top_p;min_p;temperature')+sel('ignore_eos','Ignore end token','Keep generating past EOS.',TF,'tf')+sel('cache_prompt','Reuse prompt cache','Faster follow-ups. Server default is on.',TF,'tf')+area('logit_bias','Logit bias (JSON)','e.g. [[15043,-5]] or {"15043":-5}','','p',2)+area('grammar','GBNF grammar','Constrain output to a grammar.','root ::= "yes" | "no"','p',3))+
  grp('Raw request JSON','anything else',area('xj','Merged into every request','Last word. e.g. {"chat_template_kwargs":{"enable_thinking":false}}','{}','',3).replace('data-k=".xj"','data-k="xj"'))+
- grp('Server','needs restart',`<div class="note" style="margin:0 0 4px">These change how llama-server starts. Wrong flags can stop it; tap the screen after a failed start to reset.</div>`+num('ctx','Context size','Tokens of memory. Default 8192.','8192',512,131072,512,'int','srv')+num('threads','Threads','CPU threads for generation.','4',1,16,1,'int','srv')+num('threads_batch','Batch threads','Threads for prompt processing.','same',1,16,1,'int','srv')+num('batch','Batch size','Prompt batch (-b).','2048',32,8192,32,'int','srv')+num('ubatch','Micro-batch','Physical batch (-ub).','512',32,4096,32,'int','srv')+num('parallel','Slots','Parallel chats. Default 1.','1',1,8,1,'int','srv')+sel('fa','Flash attention','Faster, less memory. Needed for a quantized V cache. Default: on.',[['','Default (on)'],['auto','Auto'],['on','On'],['off','Off']],'str','srv')+sel('ctk','K cache type','Smaller = less memory. Default: q8_0.',[['','Default (q8_0)'],['f16','f16'],['q8_0','q8_0'],['q4_0','q4_0']],'str','srv')+sel('ctv','V cache type','Quantized needs flash attention. Default: q8_0.',[['','Default (q8_0)'],['f16','f16'],['q8_0','q8_0'],['q4_0','q4_0']],'str','srv')+sel('mlock','Lock in RAM','Stops the model being swapped out.',TF,'tf','srv')+sel('no_mmap','Disable mmap','Load the whole model into RAM.',TF,'tf','srv')+txt('extra','Extra flags','Raw llama-server arguments.','--rope-freq-scale 0.5','srv')+`<div id="srvinfo" class="tst"></div><button class="btn full" id="p-info">Read live server info</button><button class="btn p full" id="p-apply">Apply &amp; restart server</button>`)+
+ grp('Server','needs restart',`<div class="note" style="margin:0 0 4px">These change how llama-server starts. Wrong flags can stop it; tap the screen after a failed start to reset.</div>`+num('ctx','Context size','Tokens of memory. Default 8192.','8192',512,131072,512,'int','srv')+num('threads','Threads','CPU threads for generation (-t). On big.LITTLE Snapdragon, 4–5 matching Performance cores often beats higher counts.','4',1,16,1,'int','srv')+num('threads_batch','Batch threads','Threads for prompt processing (-tb). Can exceed Threads.','same',1,16,1,'int','srv')+num('gpu_layers','GPU layers (-ngl)','Offload N layers to GPU (Vulkan/OpenCL build only). 0 = CPU only. Needs a GPU-enabled libllama_server.so.','0',0,999,1,'int','srv')+num('batch','Batch size','Prompt batch (-b).','2048',32,8192,32,'int','srv')+num('ubatch','Micro-batch','Physical batch (-ub).','512',32,4096,32,'int','srv')+num('parallel','Slots','Parallel chats. Default 1.','1',1,8,1,'int','srv')+sel('fa','Flash attention','Faster, less memory. Needed for a quantized V cache. Default: on.',[['','Default (on)'],['auto','Auto'],['on','On'],['off','Off']],'str','srv')+sel('ctk','K cache type','Smaller = less memory. Default: q8_0.',[['','Default (q8_0)'],['f16','f16'],['q8_0','q8_0'],['q4_0','q4_0']],'str','srv')+sel('ctv','V cache type','Quantized needs flash attention. Default: q8_0.',[['','Default (q8_0)'],['f16','f16'],['q8_0','q8_0'],['q4_0','q4_0']],'str','srv')+sel('mlock','Lock in RAM','Stops the model being swapped out.',TF,'tf','srv')+sel('no_mmap','Disable mmap','Load the whole model into RAM.',TF,'tf','srv')+txt('extra','Extra flags','Raw llama-server arguments. For core affinity on big.LITTLE, prefer launching via taskset in a Termux wrapper, or pass backend flags here (e.g. -ngl 12).','--rope-freq-scale 0.5','srv')+`<div class="note" style="margin:8px 0 0">Snapdragon tip: pin generation threads to Performance cores (taskset) for ~10–15% tok/s and less jitter. GPU tip: a Vulkan/OpenCL-built llama-server can use <b>GPU layers</b> to cool the CPU on 3B–4B models.</div>`+`<div id="srvinfo" class="tst"></div><button class="btn full" id="p-info">Read live server info</button><button class="btn p full" id="p-apply">Apply &amp; restart server</button>`)+
  `<button class="btn full dng" id="p-reset">Reset all power settings</button></div>`}
 function paneGen(){return`<div class="pane" data-p="gen"><div class="fi"><label>Server URL${Q('url','Server URL','')}</label><input class="in" data-k="url" data-t="str" autocapitalize="off" autocorrect="off" spellcheck="false"></div><div class="r2"><button class="btn sm" id="s-test">Test connection</button></div><div class="tst" id="tst"></div>
 <div class="fi" style="margin-top:14px"><label>Context window <span style="color:var(--fg-3);font-weight:400">(-c) · needs restart</span>${Q('ctx','Context window','')}</label>
@@ -3898,6 +4083,7 @@ $('#in').addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey&&matchMe
 $('#go').onclick=()=>busy?stopAll():send($('#in').value);
 $('#mn').onclick=()=>drawer(true);$('#sbx').onclick=$('#scrim').onclick=()=>drawer(false);
 $('#nw').onclick=$('#nw2').onclick=()=>{if(busy)return;const c=cur();if(!c||c.messages.length){cid=null}drawer(false);render();$('#in').focus()};
+$('#btn-condense')&&($('#btn-condense').onclick=()=>{if(busy)return;condenseChat()});
 $('#hist').onclick=e=>{const r=e.target.closest('.row');if(!r||busy)return;if(e.target.closest('[data-del]')){chats=chats.filter(c=>c.id!==r.dataset.id);if(cid===r.dataset.id)cid=null}else{cid=r.dataset.id;drawer(false)}save();render()};
 $('#th').onclick=e=>{const t=e.target;if(t.closest('.chip'))return send(t.textContent);let b;
  if(b=t.closest('[data-ok]'))return approve(b.dataset.ok,true);if(b=t.closest('[data-no]'))return approve(b.dataset.no,false);
@@ -4977,8 +5163,7 @@ const FV = {
       const r=JSON.parse(await nat('list_dir',{path:this.path||'.',limit:2000,sort:this.sort,hidden:false}));
       const entries=(r.data&&r.data.entries)||[];
       this.entries=entries;
-      const q=($('#fv-filter')?.value||'').trim().toLowerCase();
-      const shown=q?entries.filter(e=>(e.n||'').toLowerCase().includes(q)):entries;
+      const shown=this.applyFilters?this.applyFilters(entries):(entries||[]);
       list.innerHTML='';
       if(this.path!=='.'&&this.path!==''){
         const up=document.createElement('div'); up.className='fv-row';
@@ -5190,12 +5375,39 @@ $('#fv-back')?.addEventListener('click',()=>showFileViewer(false));
 $('#fv-x')?.addEventListener('click',()=>showFileViewer(false));
 $('#fv-refresh')?.addEventListener('click',()=>FV.render());
 $('#fv-home')?.addEventListener('click',()=>{FV.path='.';FV.selected.clear();FV.render()});
+
+FV.typeFilter = FV.typeFilter || 'all';
+FV.grid = !!FV.grid;
+FV.matchesType = function(e){
+  const ft = this.typeFilter || 'all';
+  if(ft==='all') return true;
+  if(ft==='dir') return !!e.d;
+  if(e.d) return false;
+  const n = (e.n||'').toLowerCase();
+  const code = /\.(py|js|ts|tsx|jsx|kt|java|c|cc|cpp|h|hpp|rs|go|swift|rb|php|css|scss|html|xml|json|yaml|yml|toml|md|sh|bash|zsh|sql)$/i;
+  const doc = /\.(txt|md|pdf|doc|docx|rtf|csv|tsv|log)$/i;
+  const img = /\.(png|jpe?g|gif|webp|svg|ico|bmp|heic)$/i;
+  const model = /\.(gguf|bin|safetensors|onnx|pt|pth|ckpt)$/i;
+  if(ft==='code') return code.test(n);
+  if(ft==='doc') return doc.test(n);
+  if(ft==='img') return img.test(n);
+  if(ft==='model') return model.test(n);
+  if(ft==='web') return /web-cache/i.test(e.p||'') || /web-cache/i.test(this.path||'');
+  return true;
+};
+FV.applyFilters = function(entries){
+  const q = ($('#fv-filter')?.value||'').trim().toLowerCase();
+  return (entries||[]).filter(e=>{
+    if(q && !(e.n||'').toLowerCase().includes(q)) return false;
+    return this.matchesType(e);
+  });
+};
+
 $('#fv-filter')?.addEventListener('input',()=>{ try{ FV.renderFromCache?.() || FV.render(); }catch(_){ FV.render(); }});
 // Filter without re-fetch when entries already loaded
 FV.renderFromCache = function(){
   const list=$('#fv-list'); if(!list||!this.entries) return this.render();
-  const q=($('#fv-filter')?.value||'').trim().toLowerCase();
-  const shown=q?this.entries.filter(e=>(e.n||'').toLowerCase().includes(q)):this.entries;
+  const shown=this.applyFilters?this.applyFilters(this.entries):(this.entries||[]);
   list.innerHTML='';
   if(this.path!=='.'&&this.path!==''){
     const up=document.createElement('div'); up.className='fv-row';
@@ -5221,6 +5433,21 @@ FV.renderFromCache = function(){
   });
   this.syncBar();
 };
+
+$('#fv-grid')?.addEventListener('click',()=>{
+  FV.grid=!FV.grid;
+  const list=$('#fv-list'); if(list) list.classList.toggle('grid', !!FV.grid);
+  $('#fv-grid').classList.toggle('on', !!FV.grid);
+  $('#fv-grid').textContent=FV.grid?'List':'Grid';
+  try{FV.renderFromCache?.()}catch(_){FV.render()}
+});
+$('#fv-typechips')?.addEventListener('click',(ev)=>{
+  const b=ev.target.closest('[data-ft]'); if(!b)return;
+  FV.typeFilter=b.dataset.ft||'all';
+  $('#fv-typechips').querySelectorAll('button').forEach(x=>x.classList.toggle('on', x===b));
+  try{FV.renderFromCache?.()}catch(_){FV.render()}
+});
+
 $('#fv-sort')?.addEventListener('click',()=>{
   FV.sort=FV.sort==='name'?'size':FV.sort==='size'?'date':'name';
   $('#fv-sort').textContent='Sort: '+FV.sort;
