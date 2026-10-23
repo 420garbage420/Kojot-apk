@@ -1015,13 +1015,14 @@ const FT=[
  fn('list_pdf_fields','List fillable form fields in a PDF (text, checkbox, dropdown). Opens the PDF in the form editor if needed.',{path:S('PDF path')},['path']),
  fn('fill_pdf_fields','Fill PDF form fields and save. fields is an array of {name, value} or {name, checked:true/false} for checkboxes. Optional out_path to write a copy.',{path:S('Source PDF path'),fields:P('array','Array of {name, value} or {name, checked}',{items:{type:'object'}}),out_path:S('Optional output path (default overwrites with _filled suffix)')},['path','fields']),
  fn('read_pdf_text','Extract text from a PDF: uses the text layer when present, otherwise suggests ocr_pdf for scans.',{path:S('PDF path'),max_pages:Nn('Max pages (default 10)')},['path'])];
-const WT=fn('web_search','Search the web for current information.',{query:S('Search query'),max_results:Nn('1-10')},['query']);
+const WT=fn('web_search','Search the web for current information. Every result page is saved under web-cache/ in the workspace (full text when the provider returns it). Returns titles, urls, short snippets and the Saved path — use read_file on a Saved path for the full page.',{query:S('Search query'),max_results:Nn('1-10')},['query']);
+const WT_FETCH=fn('fetch_page','Fetch full page text for specific URLs (max 5) via Tavily extract and save each under web-cache/. Use after web_search when a snippet is too short (GitHub issues, docs, model cards, changelogs).',{urls:AR('One to five page URLs to fetch in full')},['urls']);
 const ASK=new Set(['forge_tool','delete_forged_tool','gh_commit','gh_create_pr','move','copy','delete','write_file','edit_file','fill_pdf_fields']);
 const searchReady=()=>{const p=PROV[cfg.search.prov];return p&&(p.need==='key'?!!cfg.search.keys[cfg.search.prov]:p.need==='sx'?!!cfg.search.sx:p.need==='cu'?!!cfg.search.cu:true)};
 function tools(){
   const t=[];
   if(cfg.files&&NI)t.push(...FT);
-  if(cfg.search.on&&searchReady())t.push(WT);
+  if(cfg.search.on&&searchReady()){t.push(WT);if(cfg.search.prov==='tavily'&&cfg.search.keys.tavily)t.push(WT_FETCH)}
   if(typeof GHT!=="undefined"&&cfg.github?.token?.trim())t.push(...GHT);
   if(typeof FORGE_TOOLS!=="undefined")t.push(...FORGE_TOOLS);
   if(typeof customTools!=="undefined"){
@@ -1032,7 +1033,7 @@ function tools(){
   }
   return t;
 }
-function sysFullBase(){let s=cfg.sys;if(tools().length){s+=`\n\nToday is ${new Date().toDateString()}. You can call tools.${cfg.files&&NI?` File paths are relative to the workspace root (${NI.root}).`:''} Look before you act: list or search to find real paths, never guess them. Use recall_files for semantic discovery. Use save_fact for durable preferences/conventions (telegraphic, under 20 words). Do destructive changes only when asked. Keep arguments short. If you lack a required tool or API integration to complete a request, use forge_tool to autonomously construct and install it. When done, say briefly what you did, and never claim something a tool did not confirm.`}return s}
+function sysFullBase(){let s=cfg.sys;if(tools().length){s+=`\n\nToday is ${new Date().toDateString()}. You can call tools.${cfg.files&&NI?` File paths are relative to the workspace root (${NI.root}).`:''} Web search and fetch_page auto-save full page text under web-cache/ — use read_file on the Saved path for details. Look before you act: list or search to find real paths, never guess them. Use recall_files for semantic discovery. Use save_fact for durable preferences/conventions (telegraphic, under 20 words). Do destructive changes only when asked. Keep arguments short. If you lack a required tool or API integration to complete a request, use forge_tool to autonomously construct and install it. When done, say briefly what you did, and never claim something a tool did not confirm.`}return s}
 function sysFull(){return sysFullBase()}
 async function dynContext(userMsg){
   let s='';
@@ -1054,7 +1055,7 @@ const kk=s=>s.keys[s.prov]||'';
 function generic(j){let best=null;(function w(o,d){if(!o||d>3||best)return;if(Array.isArray(o)){if(o.length&&typeof o[0]==='object'&&(o[0].url||o[0].link)){best=o;return}o.forEach(x=>w(x,d+1))}else if(typeof o==='object')Object.values(o).forEach(x=>w(x,d+1))})(j,0);
  return{answer:j.answer||(j.answer_box&&j.answer_box.answer),results:(best||[]).map(r=>({t:r.title||r.name,u:r.url||r.link,c:r.content||r.snippet||r.description||r.text||''}))}}
 const PROV={
- tavily:{n:'Tavily',need:'key',req:(q,n,s)=>({url:'https://api.tavily.com/search',method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+kk(s)},body:J.stringify({query:q,max_results:n,search_depth:s.depth,include_answer:true})}),norm:j=>({answer:j.answer,results:(j.results||[]).map(r=>({t:r.title,u:r.url,c:r.content}))})},
+ tavily:{n:'Tavily',need:'key',req:(q,n,s)=>({url:'https://api.tavily.com/search',method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+kk(s)},body:J.stringify({query:q,max_results:n,search_depth:s.depth,include_answer:true,include_raw_content:true})}),norm:j=>({answer:j.answer,results:(j.results||[]).map(r=>({t:r.title,u:r.url,c:r.content,raw:(r.raw_content&&String(r.raw_content).length>String(r.content||'').length)?r.raw_content:r.content}))})},
  brave:{n:'Brave',need:'key',req:(q,n,s)=>({url:'https://api.search.brave.com/res/v1/web/search?count='+n+'&q='+encodeURIComponent(q),method:'GET',headers:{Accept:'application/json','X-Subscription-Token':kk(s)}}),norm:j=>({results:((j.web||{}).results||[]).map(r=>({t:r.title,u:r.url,c:r.description}))})},
  serper:{n:'Serper',need:'key',req:(q,n,s)=>({url:'https://google.serper.dev/search',method:'POST',headers:{'Content-Type':'application/json','X-API-KEY':kk(s)},body:J.stringify({q,num:n})}),norm:j=>({answer:j.answerBox&&(j.answerBox.answer||j.answerBox.snippet),results:(j.organic||[]).map(r=>({t:r.title,u:r.link,c:r.snippet}))})},
  searxng:{n:'SearXNG',need:'sx',req:(q,n,s)=>({url:s.sx.replace(/\/$/,'')+'/search?format=json&q='+encodeURIComponent(q),method:'GET',headers:{}}),norm:j=>({answer:(j.answers||[])[0],results:(j.results||[]).map(r=>({t:r.title,u:r.url,c:r.content}))})},
@@ -1066,20 +1067,69 @@ async function webSearch(q,n){const s=cfg.search,p=PROV[s.prov];if(!q)throw Erro
    let facts='';
    try{const r=J.parse(await nat('recall_memory',{query:q,limit:6}));facts=(r.text||'').trim();if(facts==='(no matching memory)')facts=''}catch(_){}
    const text=['[Offline / network unavailable — '+reason+']','Local memory related to "'+q+'":',facts||'(no matching local facts)'].join('\n');
-   return{text,data:{answer:null,results:[],prov:'offline-memory',offline:true,reason}};
+   return{text,data:{answer:null,results:[],prov:'offline-memory',offline:true,reason,saved:[]}};
  }
  if(!searchReady())return offlineFallback('web search not configured');
  try{
    const x=await httpx(p.req(q,n,s));
    if(x.status>=400)throw Error(`${p.n} returned HTTP ${x.status}: ${x.body.slice(0,140)}`);
    let j=null;try{j=J.parse(x.body)}catch{}const o=j?p.norm(j):{results:[],raw:x.body.slice(0,1500)};const rs=o.results.filter(r=>r.u).slice(0,n);
-   const text=[o.answer?'Answer: '+String(o.answer).slice(0,600):'',...rs.map((r,i)=>`${i+1}. ${r.t||r.u}\n${r.u}\n${String(r.c||'').slice(0,300)}`),!rs.length&&o.raw?o.raw:'',!rs.length&&!o.raw?'No results.':''].filter(Boolean).join('\n\n');
-   return{text,data:{answer:o.answer&&String(o.answer).slice(0,600),results:rs.map(r=>({t:r.t,u:r.u,c:String(r.c||'').slice(0,200)})),prov:p.n}};
+   // Persist full page text into the workspace (like Quarry's ingest). OPFS is not available in the APK WebView,
+   // so we write plain files under web-cache/ which File Viewer and read_file can open.
+   const saved=await saveWebPages(rs,q,p.n);
+   const text=[o.answer?'Answer: '+String(o.answer).slice(0,600):'',...rs.map((r,i)=>{
+     const path=saved[i]&&saved[i].path;const body=String(r.raw||r.c||'').slice(0,300);
+     return `${i+1}. ${r.t||r.u}\n${r.u}${path?'\nSaved: '+path:''}\n${body}`;
+   }),!rs.length&&o.raw?o.raw:'',!rs.length&&!o.raw?'No results.':''].filter(Boolean).join('\n\n');
+   if(saved.some(x=>x&&x.path))text+='\n\nFull pages saved under web-cache/. Use read_file on a Saved path for the complete text.';
+   return{text,data:{answer:o.answer&&String(o.answer).slice(0,600),results:rs.map((r,i)=>({t:r.t,u:r.u,c:String(r.c||'').slice(0,200),path:saved[i]&&saved[i].path||null,chars:saved[i]&&saved[i].chars||0})),prov:p.n,saved:saved.filter(x=>x&&x.path)}};
  }catch(e){
    const msg=String(e.message||e);
    if(/network|failed to fetch|timeout|offline|DNS|unreachable|HTTP 0/i.test(msg)||!navigator.onLine)return offlineFallback(msg.slice(0,80));
    throw e;
  }
+}
+/** Slug a URL into a short, filesystem-safe name under web-cache/. */
+function webCacheName(url,title){
+  let host='',path='';
+  try{const u=new URL(url);host=u.hostname.replace(/^www\./,'');path=(u.pathname||'/').replace(/\/+$/,'')||'index'}catch(_){host='page';path=String(url||'').slice(0,40)}
+  const base=(title||path).toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-+|-+$/g,'').slice(0,48)||'page';
+  const h=String(url||'').split('').reduce((a,c)=>(a*31+c.charCodeAt(0))>>>0,0).toString(36).slice(0,6);
+  return `web-cache/${host}-${base}-${h}.md`;
+}
+/** Write each result's best available text into the workspace. Best-effort: skips if Native is missing. */
+async function saveWebPages(rs,query,prov){
+  if(!window.Native||!rs||!rs.length)return rs.map(()=>null);
+  const out=[];
+  try{await nat('make_dir',{path:'web-cache'})}catch(_){}
+  for(const r of rs){
+    const body=String(r.raw||r.c||'').trim();
+    if(body.length<40){out.push(null);continue}
+    const path=webCacheName(r.u,r.t);
+    const header=`# ${r.t||r.u||'Untitled'}\n\n- URL: ${r.u||''}\n- Query: ${query||''}\n- Provider: ${prov||''}\n- Saved: ${new Date().toISOString()}\n\n---\n\n`;
+    const content=(header+body).slice(0,200000);
+    try{
+      await nat('write_file',{path,content,overwrite:true});
+      out.push({path,chars:content.length,url:r.u,title:r.t});
+    }catch(e){out.push(null)}
+  }
+  return out;
+}
+/** Fetch full page text for specific URLs (Tavily extract) and store under web-cache/. Max 5 URLs. */
+async function fetchPages(urls){
+  const list=[].concat(urls||[]).map(u=>String(u||'').trim()).filter(Boolean).slice(0,5);
+  if(!list.length)throw Error('urls is required (1-5)');
+  const s=cfg.search;
+  if(s.prov!=='tavily'||!s.keys.tavily)throw Error('fetch_page needs the Tavily provider and API key (Settings → Web search)');
+  const x=await httpx({url:'https://api.tavily.com/extract',method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+s.keys.tavily},body:J.stringify({urls:list,extract_depth:s.depth||'basic',format:'markdown'})});
+  if(x.status>=400)throw Error(`Tavily extract HTTP ${x.status}: ${x.body.slice(0,140)}`);
+  let j=null;try{j=J.parse(x.body)}catch{}const rs=(j&&j.results||[]).map(r=>({t:(r.raw_content||'').split('\n').find(l=>l.trim())||r.url,u:r.url,c:r.raw_content||'',raw:r.raw_content||''}));
+  const failed=(j&&j.failed_results||[]).map(f=>({u:f.url,error:String(f.error||'').slice(0,120)}));
+  const saved=await saveWebPages(rs,'extract', 'Tavily extract');
+  const lines=rs.map((r,i)=>{const p=saved[i]&&saved[i].path;return `${i+1}. ${r.u}${p?'\nSaved: '+p+' ('+(saved[i].chars||0)+' chars)':'\n(not saved)'}`});
+  if(failed.length)lines.push('Failed: '+failed.map(f=>f.u+' — '+f.error).join('; '));
+  if(!rs.length&&!failed.length)lines.push('No content returned.');
+  return{text:lines.join('\n\n'),data:{results:rs.map((r,i)=>({t:r.t,u:r.u,path:saved[i]&&saved[i].path||null,chars:saved[i]&&saved[i].chars||0})),failed,prov:'Tavily extract',saved:saved.filter(x=>x&&x.path)}};
 }
 
 /* ---------- tool cards ---------- */
@@ -1099,7 +1149,8 @@ const TT={
  move:{i:'move',v:['Moving','Moved','Move'],o:a=>items(a.src),s:a=>`${arr(a.src).map(base).join(', ')} → ${a.dst||''}`},
  copy:{i:'copy',v:['Copying','Copied','Copy'],o:a=>items(a.src),s:a=>`${arr(a.src).map(base).join(', ')} → ${a.dst||''}`},
  delete:{i:'trash',v:['Deleting','Deleted','Delete'],o:a=>items(a.paths||a.path),s:a=>arr(a.paths||a.path).join(', ')},
- web_search:{i:'globe',v:['Searching','Searched','Search'],o:a=>'the web for "'+(a.query||'…')+'"',s:(a,k)=>k.data?k.data.results.length+' results · '+k.data.prov:(PROV[cfg.search.prov]||{}).n||''},
+ web_search:{i:'globe',v:['Searching','Searched','Search'],o:a=>'the web for "'+(a.query||'…')+'"',s:(a,k)=>k.data?(k.data.results.length+' results · '+k.data.prov+(k.data.saved&&k.data.saved.length?' · '+k.data.saved.length+' saved':'')):(PROV[cfg.search.prov]||{}).n||''},
+ fetch_page:{i:'globe',v:['Fetching','Fetched','Fetch'],o:a=>((a.urls&&a.urls.length)||0)+' page(s)',s:(a,k)=>k.data&&k.data.saved?k.data.saved.length+' saved under web-cache/':''},
  write_file:{i:'file',v:['Writing','Wrote','Write'],o:a=>base(a.path||'file'),s:a=>(a.path||'')+' ('+fmt((a.content||'').length)+')'},
  edit_file:{i:'file',v:['Editing','Edited','Edit'],o:a=>base(a.path||'file'),s:a=>a.path||''},
  save_fact:{i:'bulb',v:['Remembering','Remembered','Remember'],o:a=>'['+(a.tag||'NOTE')+']',s:a=>a.content||''},
@@ -1123,7 +1174,7 @@ function bodyHTML(k){const a=k.args||{},d=k.data||{};let h='';
  else if(k.name==='delete'){h=arr(a.paths||a.path).map(p=>`<div class="ln">${ic('trash')}<span>${esc(p)}</span></div>`).join('')+(a.permanent?'<div class="warn">Permanent — this cannot be undone</div>':'<div class="note">Goes to .agent/trash/ — recoverable</div>')}
  else if(k.name==='make_dir')h=arr(a.paths||a.path).map(p=>`<div class="ln">${ic('mkdir')}<span>${esc(p)}</span></div>`).join('');
  else if(d.entries){const L=d.entries.slice(0,40);h=`<div class="lst">${L.map(e=>`<div class="ln">${ic(e.d?'folder':'file')}<span>${esc(d.full?e.p:e.n)}${e.d?'/':''}</span>${e.d?'':`<i>${fmt(e.s)}</i>`}</div>`).join('')}</div>`+(d.entries.length>40||d.more?`<div class="note">+ more not shown here</div>`:'')}
- else if(d.results){h=(d.answer?`<div class="ans">${esc(d.answer)}</div>`:'')+d.results.map(r=>{let dm='';try{dm=new URL(r.u).hostname.replace(/^www\./,'')}catch{}return`<a class="sr" href="${ea(r.u)}" target="_blank" rel="noopener"><s>${esc((dm||'?')[0].toUpperCase())}</s><div><b>${esc(r.t||dm)}</b><small>${esc(dm)}</small><p>${esc(r.c||'')}</p></div></a>`}).join('')}
+ else if(d.results){h=(d.answer?`<div class="ans">${esc(d.answer)}</div>`:'')+d.results.map(r=>{let dm='';try{dm=new URL(r.u).hostname.replace(/^www\./,'')}catch{}const path=r.path?`<small class="muted">Saved: ${esc(r.path)}${r.chars?' · '+r.chars+' chars':''}</small>`:'';return`<a class="sr" href="${ea(r.u)}" target="_blank" rel="noopener"><s>${esc((dm||'?')[0].toUpperCase())}</s><div><b>${esc(r.t||dm)}</b><small>${esc(dm)}</small><p>${esc(r.c||'')}</p>${path}</div></a>`}).join('')+(d.saved&&d.saved.length?`<div class="meta">${d.saved.length} page(s) stored under web-cache/</div>`:'')}
  else if(k.name==='read_file'&&k.res)h='<pre>'+esc(k.res)+'</pre>';
  else if(k.name==='write_file'){h='<div class="ln">'+ic('file')+'<span>'+esc(a.path||'')+'</span><i>'+fmt((a.content||'').length)+'</i></div>';if(a.content)h+='<pre style="max-height:120px">'+esc(String(a.content).slice(0,600))+(String(a.content).length>600?'…':'')+'</pre>';}
  else if(k.name==='edit_file'){h='<div class="ln">'+ic('file')+'<span>'+esc(a.path||'')+'</span></div>';
@@ -1266,7 +1317,8 @@ function condenseTool(k) {
   if (k.name === "move" || k.name === "copy") return "[" + k.name + " OK]";
   if (k.name === "delete") return "[Deleted: OK]";
   if (k.name === "save_fact") return "[Saved fact: OK]";
-  if (k.name === "web_search") return "[Web search: " + (k.data?.results?.length || 0) + " results used]";
+  if (k.name === "web_search") return "[Web search: " + (k.data?.results?.length || 0) + " results used" + (k.data?.saved?.length ? ", " + k.data.saved.length + " saved" : "") + "]";
+  if (k.name === "fetch_page") return "[Fetched pages: " + (k.data?.saved?.length || 0) + " saved]";
   if (k.name === "get_vitals") return "[Vitals: " + (k.data?.battery_pct || "?") + "% battery]";
   if (k.name.startsWith("gh_")) return "[GitHub " + k.name + ": OK]";
   return String(k.res || "(done)").slice(0, 120);
@@ -1640,6 +1692,7 @@ async function runTool(k){
   if(cached)return{...cached,_cached:true};
   let out;
   if(k.name==='web_search')out=await webSearch(k.args.query,k.args.max_results);
+  else if(k.name==='fetch_page')out=await fetchPages(k.args.urls);
   else if(k.name.startsWith('gh_'))out=await ghTool(k.name,k.args);
   else if(k.name==='forge_tool')out=await forgeCustomTool(k.args);
   else if(k.name==='list_forged_tools')out=await listCustomTools();
