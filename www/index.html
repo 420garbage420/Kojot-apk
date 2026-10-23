@@ -1114,7 +1114,7 @@ async function saveWebPages(rs,query,prov){
     if(body.length<40){out.push(null);continue}
     const path=webCacheName(r.u,r.t);
     const hash=String(body.length)+':'+body.slice(0,200).split('').reduce((a,c)=>(a*31+c.charCodeAt(0))>>>0,0).toString(36);
-    if(cfg.search.dedup!==false){try{const prev=J.parse(await nat('read_file',{path,max_chars:400}));const head=(prev.text||'').slice(0,400);const mh=(head.match(/Content-Hash:\s*(\S+)/)/)||[])[1];if(mh===hash){out.push({path,chars:body.length,url:r.u,title:r.t,dedup:true});continue}}catch(_){}}
+    if(cfg.search.dedup!==false){try{const prev=J.parse(await nat('read_file',{path,max_chars:400}));const head=(prev.text||'').slice(0,400);const mh=(head.match(/Content-Hash:\s*(\S+)/)||[])[1];if(mh===hash){out.push({path,chars:body.length,url:r.u,title:r.t,dedup:true});continue}}catch(_){}}
     const header=`# ${r.t||r.u||'Untitled'}\n\n- URL: ${r.u||''}\n- Query: ${query||''}\n- Provider: ${prov||''}\n- Saved: ${new Date().toISOString()}\n- Content-Hash: ${hash}\n\n---\n\n`;
     const content=(header+body).slice(0,200000);
     try{
