@@ -47,6 +47,9 @@ class LlamaService : Service() {
         private set
     /** Bumps on every boot/swap so a stale boot thread aborts instead of orphaning a process. */
     @Volatile private var bootGen: Int = 0
+    // Flash attention + q8_0 KV cache are the defaults; if the server can't start with them, we fall back once to f16.
+    @Volatile private var safeKv: Boolean = false
+    @Volatile private var kvDefaultsUsed: Boolean = false
     @Volatile private var booting: Boolean = false
 
     private var wakeLock: PowerManager.WakeLock? = null
@@ -325,9 +328,10 @@ class LlamaService : Service() {
 
             if (gen != bootGen) return
 
-            val p = ProcessBuilder(serverArgs(exe.path, www.path)).redirectErrorStream(true).start()
+            var p = ProcessBuilder(serverArgs(exe.path, www.path)).redirectErrorStream(true).start()
             proc = p
-            thread { p.inputStream.bufferedReader().forEachLine { Log.d("llama", it) } }
+            run { val pp = p; thread { pp.inputStream.bufferedReader().forEachLine { Log.d("llama", it) } } }
+            var retried = false
 
             repeat(300) {
                 if (gen != bootGen) {
@@ -335,6 +339,18 @@ class LlamaService : Service() {
                     return
                 }
                 if (!p.isAlive) {
+                    if (kvDefaultsUsed && !safeKv && !retried) {
+                        retried = true
+                        safeKv = true
+                        Log.w(TAG, "Server exited with flash-attn/q8 KV defaults; retrying once with f16 KV")
+                        updateNotification("Retrying without KV quantization…")
+                        p = ProcessBuilder(serverArgs(exe.path, www.path)).redirectErrorStream(true).start()
+                        proc = p
+                        val pp = p
+                        thread { pp.inputStream.bufferedReader().forEachLine { Log.d("llama", it) } }
+                        return@repeat
+                    }
+                    if (retried) safeKv = false   // the retry failed too, so the KV flags weren't the cause
                     val code = try { p.exitValue() } catch (_: Exception) { -1 }
                     val err = "Model server exited (code $code)"
                     Log.e(TAG, err)
@@ -348,6 +364,7 @@ class LlamaService : Service() {
                     if (c.responseCode == 200) {
                         ready = true
                         lastError = null
+                        if (retried) prefs.edit().putBoolean("kv_safe", true).apply()  // remember: this device/build needs f16 KV
                         updateNotification(activeModelFile().name)
                         notifyReady(true, null)
                         return
@@ -529,7 +546,20 @@ class LlamaService : Service() {
         val defaultCtx = if (activeSlot == "coder") 8192 else 8192
         num("ctx", "-c", defaultCtx); num("threads", "-t", 4); num("threads_batch", "-tb", 0)
         num("batch", "-b", 0); num("ubatch", "-ub", 0); num("parallel", "-np", 1)
-        word("fa", "-fa"); word("ctk", "-ctk"); word("ctv", "-ctv")
+        // Flash attention + q8_0 K/V cache by default: roughly half the KV memory at near-identical quality.
+        // A quantized V cache REQUIRES flash attention, so FA is forced on whenever V is quantized.
+        // Anything set explicitly in Settings (even "off"/"f16") wins over these defaults.
+        val safe = safeKv || prefs.getBoolean("kv_safe", false)
+        fun pick(key: String, def: String): String {
+            val v = s.optString(key, "").trim().lowercase()
+            return if (Regex("[a-z0-9_]{1,12}").matches(v)) v else def
+        }
+        val ctk = pick("ctk", if (safe) "f16" else "q8_0")
+        val ctv = pick("ctv", if (safe) "f16" else "q8_0")
+        var fa = pick("fa", if (safe) "auto" else "on")
+        if (ctv != "f16" && ctv != "f32" && ctv != "bf16" && fa == "off") fa = "on"
+        kvDefaultsUsed = !safe && (s.optString("fa", "").isBlank() || s.optString("ctk", "").isBlank() || s.optString("ctv", "").isBlank())
+        a.add("-fa"); a.add(fa); a.add("-ctk"); a.add(ctk); a.add("-ctv"); a.add(ctv)
         if (s.optBoolean("mlock", false)) a.add("--mlock")
         if (s.optBoolean("no_mmap", false)) a.add("--no-mmap")
         s.optString("extra", "").trim().split(Regex("\\s+")).filter { it.isNotEmpty() }.forEach { a.add(it) }

@@ -1,4 +1,4 @@
-# Kojot Lite build-27: audit & change report
+# Kojot Lite build-27: audit & change report (updated, round 2 at the bottom)
 
 Everything below was checked either **in a real headless Chromium** (mobile-emulated 412×915 @3.5x, the real `index.html`, a stubbed native bridge, a fake streaming llama-server, real Monaco) or **by compiling/running the Kotlin** (Kotlin 1.9.24 against Android 34; `FileTools` executed on a real filesystem with a real `org.json`). Nothing was run on a physical S26 Ultra; items that need a device are listed at the end.
 
@@ -49,3 +49,29 @@ Test results: editor suite 25/25, explorer/key-bar suite 13/13, AI-edit chain ve
 
 ## 4. Files changed
 `www/index.html` (UI), `FileTools.kt` (stat, search_text, atomic write, `expect_mtime`, mtime in entries, faster listing), `MainActivity.kt` (WebChromeClient, non-blocking `info()`, asset refresh). `LlamaService.kt` / `MemoryTools.kt` / `PdfTools.kt` untouched.
+
+
+---
+## Round 2
+
+### 0. The agent could not see any tool output (pre-existing, critical)
+The model received `[Listed .: 4 found]`, `[Read file (63 chars)]`, `[Web search: 5 results used]` instead of the real results. `apiMsgs` kept results in full only for the *last* assistant message, but the agent loop starts a new assistant message for every step, so results were condensed the moment the model needed them. Reproduced on build-26, fixed: results stay full for every step since your latest message and are condensed only on later turns (context saving preserved). Regression test: the fake model echoes what it was given: build-26 **fails** (list_dir, read_file), build-27 passes. Web search flows through the same path.
+
+### 1. Flash attention + quantized KV cache (on by default)
+`-fa on -ctk q8_0 -ctv q8_0` unless you set something explicitly in Settings → Power (an explicit value, including `off`/`f16`, always wins). A quantized V cache requires flash attention, so FA is forced on in that case. Safety net: if the server dies on boot with these defaults it retries once with f16/auto, and remembers that if the retry works. Flags were checked against llama.cpp `master` (`-fa [on|off|auto]`, `-ctk`/`-ctv`). Default context stays 8192; with the q8 cache, 16384 costs about what 8192 used to, so raise it in Settings if you want longer chats.
+
+### 2. "?" explanations
+Every setting (64/64) has a small **?**; tap it for a short explanation toast (tap the toast to dismiss). Covers sampling, repetition/DRY/Mirostat, server (ctx, threads, batch, flash attention, KV types, mlock…), generation, tools, GitHub and web-search keys. Text lives in the `HELP` table in `index.html`.
+
+### 3. PDFs
+* Only the first **25 pages** of any PDF were ever rendered (hard cap). Now every page is reachable: pages render lazily as you scroll, off-screen canvases are released (150-page test: peak 14 canvases), the page label tracks your scroll, and your scroll position survives edits.
+* The pdf.js **worker never loaded** (it was probed with `fetch` on `file://`, which isn't supported), so parsing ran on the UI thread and froze the app. It now runs in a real background worker.
+* Files no longer travel through the JS bridge as one giant base64 string: the native layer streams them at `https://kojot.fs/<path>` (same workspace jail and file gates as every other file op; falls back to the old path on an older native layer). Used by the viewer, text extraction, conversions and image preview.
+* Not changed: pdf-lib still parses the whole document on open (needed for form-filling/stamping); on very large PDFs a lazy load would be the next step.
+
+### 4. File-system buttons
+In build-26 Rename/New folder/Delete (and ~20 other actions) called `prompt()`/`confirm()`, which do nothing in an Android WebView. Round 1 replaced them with in-app dialogs; every File Viewer toolbar button is now tested (new folder, rename, copy/paste, delete). Rename was also hard to find (only via checkbox + toolbar), so the file sheet now has **Rename, Copy, Cut, Copy path**, and folders get a sheet without the file-only actions. A smoke test that clicks every button on the sidebar, chat, File Viewer, editor and Settings found no button that throws.
+
+### Files changed in round 2
+`www/index.html`, `LlamaService.kt` (FA/KV defaults + fallback), `MainActivity.kt` (`kojot.fs` stream, shared `fileTools()`).
+Verification: Kotlin compiles against Android 34 / Kotlin 1.9.24; JS suites: editor 25/25, explorer 13/13, File Viewer 7/7 + 6/6, tool delivery 3/3, help 64/64. Not run on a physical device.

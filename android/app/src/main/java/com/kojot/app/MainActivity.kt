@@ -19,13 +19,16 @@ import android.webkit.JavascriptInterface
 import android.webkit.ConsoleMessage
 import android.webkit.ValueCallback
 import android.webkit.WebChromeClient
+import android.webkit.MimeTypeMap
 import android.webkit.WebResourceRequest
+import android.webkit.WebResourceResponse
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.FrameLayout
 import android.widget.TextView
 import org.json.JSONArray
 import org.json.JSONObject
+import java.io.ByteArrayInputStream
 import java.io.File
 import java.net.HttpURLConnection
 import java.net.URL
@@ -211,6 +214,24 @@ class MainActivity : Activity() {
                 }
             }
             webViewClient = object : WebViewClient() {
+                // https://kojot.fs/<path> streams a workspace file straight into the page (PDFs, images) without
+                // base64-encoding it through the JS bridge. Same root jail + file gates as every other file op.
+                override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse? {
+                    val u = request.url
+                    if (u.scheme != "https" || u.host != "kojot.fs") return super.shouldInterceptRequest(view, request)
+                    val hdr = mutableMapOf("Access-Control-Allow-Origin" to "*", "Cache-Control" to "no-store")
+                    return try {
+                        val f = fileTools().safe(Uri.decode(u.encodedPath ?: "").trimStart('/'))
+                        if (!f.isFile) throw ToolError("not a file")
+                        val mime = MimeTypeMap.getSingleton().getMimeTypeFromExtension(f.extension.lowercase()) ?: "application/octet-stream"
+                        hdr["Content-Length"] = f.length().toString()
+                        WebResourceResponse(mime, null, 200, "OK", hdr, f.inputStream().buffered())
+                    } catch (e: Exception) {
+                        val msg = e.message ?: "error"
+                        val code = if (msg.contains("gated", true) || msg.contains("outside", true) || msg.contains("granted", true)) 403 else 404
+                        WebResourceResponse("text/plain", "utf-8", code, if (code == 403) "Forbidden" else "Not Found", hdr, ByteArrayInputStream(msg.toByteArray()))
+                    }
+                }
                 override fun shouldOverrideUrlLoading(v: WebView, r: WebResourceRequest): Boolean {
                     val u = r.url
                     if (u.scheme == "file") return false
@@ -1117,17 +1138,20 @@ class MainActivity : Activity() {
             JSONObject().put("ok", ok).put("ocr_ready", ok)
                 .put("text", if (ok) "OCR vision server ready" else "OCR not available (ML Kit fallback)")
         }
-        else -> {
-            if (!filesOk()) throw ToolError("Files access isn't granted yet. Open Settings → Tools → Files and tap Grant.")
-            val gatesRaw = prefs.getString("file_gates", "[]") ?: "[]"
-            val gatesArr = try { JSONArray(gatesRaw) } catch (_: Exception) { JSONArray() }
-            val gates = mutableListOf<String>()
-            for (gi in 0 until gatesArr.length()) {
-                val s = gatesArr.optString(gi, "").trim()
-                if (s.isNotEmpty()) gates.add(s)
-            }
-            FileTools(rootDir(), gates).run(op, a)
+        else -> fileTools().run(op, a)
+    }
+
+    /** One place that builds the file tools, so the JS bridge and the WebView byte stream obey the same access + gate rules. */
+    private fun fileTools(): FileTools {
+        if (!filesOk()) throw ToolError("Files access isn't granted yet. Open Settings → Tools → Files and tap Grant.")
+        val gatesRaw = prefs.getString("file_gates", "[]") ?: "[]"
+        val gatesArr = try { JSONArray(gatesRaw) } catch (_: Exception) { JSONArray() }
+        val gates = mutableListOf<String>()
+        for (gi in 0 until gatesArr.length()) {
+            val s = gatesArr.optString(gi, "").trim()
+            if (s.isNotEmpty()) gates.add(s)
         }
+        return FileTools(rootDir(), gates)
     }
 
     inner class Bridge {

@@ -432,6 +432,11 @@ textarea.in{height:auto;min-height:64px;padding:9px 12px;font:13px/19px var(--mo
 .as{width:min(520px,100%);background:var(--bg-elevated);border-radius:20px 20px 0 0;padding:8px 8px calc(10px + env(safe-area-inset-bottom));max-height:80dvh;overflow-y:auto;animation:rise .18s var(--ease)}
 .as-t{padding:10px 12px;font-size:12px;color:var(--fg-3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .as-i{display:flex;flex-direction:column;align-items:flex-start;width:100%;padding:13px 14px;border-radius:12px;font-size:15px;text-align:left;color:var(--fg)}.as-i:active{background:var(--bg-hover)}.as-i.dng{color:var(--danger)}.as-i small{font-size:11px;color:var(--fg-3)}
+.qm{position:relative;display:inline-grid;place-items:center;width:18px;height:18px;margin-left:7px;padding:0;border-radius:50%;border:1px solid var(--line-strong);background:none;color:var(--fg-3);font:600 11px/1 var(--font);vertical-align:middle;cursor:pointer}
+.qm::after{content:"";position:absolute;inset:-12px}.qm:active{background:var(--bg-hover);color:var(--fg)}
+#ed-toast .t.help{pointer-events:auto;text-align:left;max-width:min(94%,440px);padding:11px 14px;font-size:13px;line-height:19px;border-color:var(--gold)}
+#ed-toast .t.help b{display:block;margin-bottom:3px;font-weight:600;color:var(--gold)}
+.pdf-pg{background:#fff;box-shadow:0 2px 16px rgba(0,0,0,.55);border-radius:2px;overflow:hidden;position:relative}.pdf-pg canvas{display:block;box-shadow:none;max-width:100%;height:auto}
 </style>
 </head>
 <body>
@@ -1302,7 +1307,9 @@ function apiMsgs(c) {
         content: m.content || "",
         tool_calls: m.calls.map(k => ({ id: k.id, type: "function", function: { name: k.name, arguments: JSON.stringify(k.args || {}) } }))
       });
-      const isCurrentTurn = (m === lastAsst);
+      // Full results for every step since the user's latest message (each agent step is its own assistant message);
+      // only results from earlier user turns are condensed.
+      const isCurrentTurn = c.messages.indexOf(m) > c.messages.lastIndexOf(lastUser);
       m.calls.forEach(k => {
         const payload = scrubJunk(isCurrentTurn ? (k.res || "(no result)") : condenseTool(k));
         out.push({ role: "tool", tool_call_id: k.id, content: payload });
@@ -1803,11 +1810,108 @@ async function ping(){const d=$('#dot');d.className='wait';$('#sub').textContent
   $('#sub').textContent='connected'+emb;return true}catch{d.className='bad';$('#sub').textContent='offline';if(!$('#ttl').textContent)$('#ttl').textContent='Kojot';return false}}
 
 /* ---------- settings ---------- */
-const sw=(k,l,h)=>`<div class="set"><div class="lt">${l}${h?`<small>${h}</small>`:''}</div><button class="sw" role="switch" data-sw="${k}" aria-label="${ea(l)}"></button></div>`;
-const num=(k,l,h,ph,mn,mx,st,t='num',r='p')=>`<div class="set"><div class="lt">${l}<small>${h}</small></div><input class="in sm" type="number" inputmode="decimal" data-k="${r}.${k}" data-t="${t}" min="${mn}" max="${mx}" step="${st}" placeholder="${ph}"></div>`;
-const sel=(k,l,h,o,t='sel',r='p')=>`<div class="set"><div class="lt">${l}<small>${h}</small></div><select class="in sm" data-k="${r}.${k}" data-t="${t}">${o.map(([v,n])=>`<option value="${v}">${n}</option>`).join('')}</select></div>`;
-const txt=(k,l,h,ph,r='p')=>`<div class="fi"><label>${l}</label><input class="in" data-k="${r}.${k}" data-t="str" placeholder="${ea(ph)}" autocapitalize="off" autocorrect="off" spellcheck="false"><small>${h}</small></div>`;
-const area=(k,l,h,ph,r='p',rows=3)=>`<div class="fi"><label>${l}</label><textarea class="in" rows="${rows}" data-k="${r}.${k}" data-t="str" placeholder="${ea(ph)}" spellcheck="false"></textarea><small>${h}</small></div>`;
+
+/* ===== v27: PDF byte reader + background worker ===== */
+async function readBytes(path){
+ // Fast path: the native layer streams the file at https://kojot.fs/<path> (no base64 string through the JS bridge).
+ try{const r=await fetch('https://kojot.fs/'+String(path).replace(/^\/+/,'').split('/').map(encodeURIComponent).join('/'));
+  if(r.ok)return new Uint8Array(await r.arrayBuffer());
+  if(r.status===403)throw Error('This file is blocked for access (file gate).');
+ }catch(e){if(/blocked/i.test(e.message||''))throw e}
+ // Fallback (older native layer): base64 through the bridge, decoded natively rather than byte-by-byte in JS.
+ const j=J.parse(await nat('read_file_b64',{path}));const b64=(j.data&&j.data.b64)||j.b64;
+ if(!b64)throw Error(j.text||'Could not read file');
+ const res=await fetch('data:application/octet-stream;base64,'+b64);return new Uint8Array(await res.arrayBuffer())}
+async function pdfWorkerPort(){
+ if(PDF._wp)return PDF._wp;if(PDF._wpFail)return null;
+ try{const txt=await new Promise((res,rej)=>{const x=new XMLHttpRequest();x.open('GET','./vendor/pdf.worker.min.js');
+   x.onload=()=>(x.responseText&&x.responseText.length>1000)?res(x.responseText):rej(new Error('worker script empty ('+x.status+')'));x.onerror=()=>rej(new Error('worker script unreadable'));x.send()});
+  PDF._wp=new Worker(URL.createObjectURL(new Blob([txt],{type:'text/javascript'})));return PDF._wp}
+ catch(e){PDF._wpFail=true;console.warn('pdf worker unavailable, using main thread:',e.message);return null}}
+async function pdfOpenDoc(raw){
+ for(let attempt=0;attempt<2;attempt++){const port=await pdfWorkerPort();
+  try{pdfjsLib.GlobalWorkerOptions.workerPort=port||null;return await pdfjsLib.getDocument({data:raw}).promise}
+  catch(e){if(port&&attempt===0){try{port.terminate()}catch(_){}PDF._wp=null;continue}
+   try{pdfjsLib.GlobalWorkerOptions.workerPort=null;pdfjsLib.GlobalWorkerOptions.workerSrc='./vendor/pdf.worker.min.js'}catch(_){}
+   return await pdfjsLib.getDocument({data:raw}).promise}}}
+
+/* ===== v27: "?" explanations (tap the ? beside any setting) ===== */
+const HELP={
+top_k:"Limits each word choice to the K most likely tokens. Lower (20–40) is safer and more predictable; higher gives more variety. 0 turns it off.",
+top_p:"Nucleus sampling: picks from the smallest group of tokens whose probabilities add up to P. 0.9–0.95 is typical; lower means more focused replies.",
+min_p:"Discards tokens far less likely than the best one (P × best). 0.05 is a good default and adapts better than Top-P on small models.",
+typical_p:"Favours tokens with 'typical' surprise rather than just the likeliest ones. 1 = off; 0.9–0.95 can make text feel less generic.",
+top_n_sigma:"Keeps only tokens within n standard deviations of the top score. -1 = off. Around 1–2 trims noisy tail tokens.",
+dynatemp_range:"Lets the temperature float up and down by this amount depending on how confident the model is. 0 = fixed temperature.",
+dynatemp_exponent:"How quickly dynamic temperature reacts. 1 is linear. Only matters when the range above is more than 0.",
+seed:"Same seed + same prompt + same settings gives the same reply. -1 = random each time. Handy for testing.",
+repeat_penalty:"Discourages tokens that already appeared. 1.0 = off; 1.05–1.15 stops loops, but too high makes text strange.",
+repeat_last_n:"How many recent tokens the repeat penalty looks at. 64 is typical; -1 = the whole context; 0 = off.",
+presence_penalty:"A flat penalty on any token already used, nudging the model toward new topics. 0 = off.",
+frequency_penalty:"A penalty that grows each time a token is reused, cutting down repeated words. 0 = off.",
+mirostat:"An alternative sampler that aims for a steady 'surprise' level instead of Top-K/Top-P. Off is fine for most chats; v2 is the usual choice if you use it.",
+mirostat_tau:"Mirostat's target surprise. Lower = more focused and predictable, higher = more varied. 5 is the usual default.",
+mirostat_eta:"How fast Mirostat adjusts toward its target. 0.1 is the usual default.",
+dry_multiplier:"DRY strongly penalises repeating whole phrases. 0 = off; around 0.8 is a common starting point.",
+dry_base:"How fast the DRY penalty grows as a repeated phrase gets longer. 1.75 is the default.",
+dry_allowed_length:"Repeats up to this many tokens are free; longer repeats are penalised. Default 2.",
+dry_penalty_last_n:"How far back DRY looks for repeated phrases. -1 = the whole context.",
+xtc_probability:"XTC sometimes removes the very top choices to avoid cliché phrasing. This is the chance it applies per token; 0 = off.",
+xtc_threshold:"Tokens above this probability are candidates for XTC removal. 0.1 is typical.",
+stop:"Text that ends the reply the moment the model writes it. One per line.",
+samplers:"The order the sampling steps run in, separated by semicolons. Leave empty unless you know you need it.",
+ignore_eos:"Keeps generating even after the model says it is finished. Usually leave on Default; can cause rambling.",
+cache_prompt:"Reuses work from the previous turn so follow-up replies start faster. The server default is on; change only when debugging.",
+logit_bias:"Makes specific tokens more or less likely (a JSON list of [token id, bias]). Advanced.",
+grammar:"Forces output to match a GBNF grammar, e.g. only 'yes' or 'no', or valid JSON. Advanced.",
+xj:"Extra JSON merged into every request and applied last. Use it for server-specific options such as chat_template_kwargs.",
+ctx:"How many tokens of conversation the model can hold at once. Bigger means longer chats but more RAM. With the q8 KV cache now on by default, 16384 costs roughly what 8192 used to. Needs a server restart.",
+threads:"CPU threads used while writing the reply. Around 4–6 is the sweet spot; generation is memory-bound, so more threads can slow the UI without speeding up replies.",
+threads_batch:"CPU threads used while reading your prompt. Can be higher than Threads because prompt reading is compute-bound. Blank = same as Threads.",
+batch:"How many prompt tokens are processed per step. Larger reads prompts faster but uses more memory. 2048 is the default.",
+ubatch:"The physical micro-batch inside each batch. Lower saves memory; 512 is the default.",
+parallel:"How many chats the server handles at once. Each slot splits the context, so leave this at 1 on a phone.",
+fa:"Flash attention: a faster, lower-memory way to compute attention, and it is required for a quantized V cache. On by default now. Needs a restart to change.",
+ctk:"Precision of the 'K' half of the KV cache (the model's short-term memory). q8_0 uses about half the RAM of f16 with almost no quality loss; q4_0 saves more but can hurt quality. q8_0 by default now.",
+ctv:"Precision of the 'V' half of the KV cache. q8_0 halves its RAM versus f16 and needs flash attention (which is switched on automatically). q8_0 by default now.",
+mlock:"Pins the model in RAM so Android cannot swap it out. Can speed up restarts, but risks the system killing the app if memory is tight.",
+no_mmap:"Loads the whole model into RAM instead of mapping the file. Slower to start and uses more RAM; only needed if mapping misbehaves on your storage.",
+extra:"Raw llama-server arguments added at the end, e.g. --rope-freq-scale 0.5. A wrong flag can stop the server.",
+thoughts:"Shows the model's reasoning ('thinking') in a collapsible block when the model sends it.",
+vision:"Enables attaching images to messages. Only works with vision models (Gemma 3, Qwen-VL) and a matching projector.",
+power:"Adds a tab containing every sampling and server parameter.",
+files:"Lets the AI list, find, read, write, edit, move, copy and delete files on your phone, inside the allowed folder.",
+ask:"Asks for your approval before the AI writes, edits, moves, copies or deletes anything.",
+auto_coder:"Switches between the chat model and the coder model depending on what you ask. Each switch reloads a model, which takes a while.",
+tool_cache:"Re-uses recent read-only tool results (like a folder listing) for 5 minutes so the AI doesn't repeat the same lookup.",
+'search.on':"Lets the model look things up on the web. Needs a search provider to be configured.",
+max:"How many search results the model gets per search (1–10). More results use more of the context.",
+mem_auto:"Lets the model save durable facts and preferences it learns about you so it can use them in later chats.",
+gh_token:"A GitHub personal access token (classic) with 'repo' scope. It stays on this phone and lets the AI's GitHub tools read and commit to your repository.",
+gh_repo:"The repository the GitHub tools use by default, written as owner/repo.",
+search_key:"API key for the selected search provider. Stored only on this phone and sent only to that provider.",
+search_sx:"Base address of your SearXNG instance. The instance must have JSON output enabled.",
+search_cu:"Your own search endpoint. {query} is replaced with the search text and {n} with the result count.",
+search_ch:"Extra HTTP headers for the custom search request, as JSON (for example an Authorization header).",
+search_cb:"Body for a POST custom search, with {query} and {n} placeholders. Leave empty for a GET request.",
+url:"Address of the llama-server the app talks to. Leave it as is to use the built-in on-device server.",
+t:"Temperature: how random replies are. 0 is very predictable, around 0.7 is balanced, above 1 is creative but less reliable.",
+m:"Maximum tokens in one reply. Longer replies are cut off (a Continue button appears).",
+sys:"Standing instructions sent at the start of every chat, such as tone or role."
+};
+const Q=(k,l,h)=>`<button type="button" class="qm" data-help="${ea(k)}" data-t="${ea(String(l).replace(/<[^>]*>/g,''))}" data-h="${ea(h||'')}" aria-label="Explain ${ea(String(l).replace(/<[^>]*>/g,''))}">?</button>`;
+function helpToast(b){const stack=$('#ed-toast');if(!stack)return;stack.querySelectorAll('.t.help').forEach(x=>x.remove());
+ const body=HELP[b.dataset.help]||b.dataset.h||'No description yet.';const el=document.createElement('div');el.className='t help';
+ const t=document.createElement('b');t.textContent=b.dataset.t||b.dataset.help;const p=document.createElement('div');p.textContent=body;el.append(t,p);stack.appendChild(el);
+ requestAnimationFrame(()=>el.classList.add('show'));const hide=()=>{el.classList.remove('show');setTimeout(()=>el.remove(),220)};
+ const to=setTimeout(hide,Math.min(14000,3500+body.length*55));el.onclick=()=>{clearTimeout(to);hide()}}
+document.addEventListener('click',e=>{const b=e.target.closest&&e.target.closest('.qm');if(!b)return;e.preventDefault();e.stopPropagation();helpToast(b)},true);
+
+const sw=(k,l,h)=>`<div class="set"><div class="lt">${l}${Q(k,l,h)}${h?`<small>${h}</small>`:''}</div><button class="sw" role="switch" data-sw="${k}" aria-label="${ea(l)}"></button></div>`;
+const num=(k,l,h,ph,mn,mx,st,t='num',r='p')=>`<div class="set"><div class="lt">${l}${Q(k,l,h)}<small>${h}</small></div><input class="in sm" type="number" inputmode="decimal" data-k="${r}.${k}" data-t="${t}" min="${mn}" max="${mx}" step="${st}" placeholder="${ph}"></div>`;
+const sel=(k,l,h,o,t='sel',r='p')=>`<div class="set"><div class="lt">${l}${Q(k,l,h)}<small>${h}</small></div><select class="in sm" data-k="${r}.${k}" data-t="${t}">${o.map(([v,n])=>`<option value="${v}">${n}</option>`).join('')}</select></div>`;
+const txt=(k,l,h,ph,r='p')=>`<div class="fi"><label>${l}${Q(k,l,h)}</label><input class="in" data-k="${r}.${k}" data-t="str" placeholder="${ea(ph)}" autocapitalize="off" autocorrect="off" spellcheck="false"><small>${h}</small></div>`;
+const area=(k,l,h,ph,r='p',rows=3)=>`<div class="fi"><label>${l}${Q(k,l,h)}</label><textarea class="in" rows="${rows}" data-k="${r}.${k}" data-t="str" placeholder="${ea(ph)}" spellcheck="false"></textarea><small>${h}</small></div>`;
 const TF=[['','Default'],['true','On'],['false','Off']];
 const grp=(n,h,body,open)=>`<details class="grp"${open?' open':''}><summary>${n}<small>${h}</small>${ic('chev')}</summary><div class="gb">${body}</div></details>`;
 function powerHTML(){return`<div class="pane" data-p="pow">
@@ -1826,10 +1930,10 @@ function powerHTML(){return`<div class="pane" data-p="pow">
  grp('XTC','exclude top choices',num('xtc_probability','Probability','Chance to apply per token. 0 = off.','0',0,1,.01)+num('xtc_threshold','Threshold','Tokens above this are candidates to cut.','0.1',0,1,.01))+
  grp('Output','stops, order, constraints',area('stop','Stop strings','One per line.','###','p',2)+txt('samplers','Sampler order','Separated by ; e.g. top_k;top_p;min_p;temperature','top_k;top_p;min_p;temperature')+sel('ignore_eos','Ignore end token','Keep generating past EOS.',TF,'tf')+sel('cache_prompt','Reuse prompt cache','Faster follow-ups. Server default is on.',TF,'tf')+area('logit_bias','Logit bias (JSON)','e.g. [[15043,-5]] or {"15043":-5}','','p',2)+area('grammar','GBNF grammar','Constrain output to a grammar.','root ::= "yes" | "no"','p',3))+
  grp('Raw request JSON','anything else',area('xj','Merged into every request','Last word. e.g. {"chat_template_kwargs":{"enable_thinking":false}}','{}','',3).replace('data-k=".xj"','data-k="xj"'))+
- grp('Server','needs restart',`<div class="note" style="margin:0 0 4px">These change how llama-server starts. Wrong flags can stop it; tap the screen after a failed start to reset.</div>`+num('ctx','Context size','Tokens of memory. Default 8192.','8192',512,131072,512,'int','srv')+num('threads','Threads','CPU threads for generation.','4',1,16,1,'int','srv')+num('threads_batch','Batch threads','Threads for prompt processing.','same',1,16,1,'int','srv')+num('batch','Batch size','Prompt batch (-b).','2048',32,8192,32,'int','srv')+num('ubatch','Micro-batch','Physical batch (-ub).','512',32,4096,32,'int','srv')+num('parallel','Slots','Parallel chats. Default 1.','1',1,8,1,'int','srv')+sel('fa','Flash attention','Needed for a quantized V cache.',[['','Default'],['auto','Auto'],['on','On'],['off','Off']],'str','srv')+sel('ctk','K cache type','Smaller = less memory.',[['','Default'],['f16','f16'],['q8_0','q8_0'],['q4_0','q4_0']],'str','srv')+sel('ctv','V cache type','Quantized needs flash attention.',[['','Default'],['f16','f16'],['q8_0','q8_0'],['q4_0','q4_0']],'str','srv')+sel('mlock','Lock in RAM','Stops the model being swapped out.',TF,'tf','srv')+sel('no_mmap','Disable mmap','Load the whole model into RAM.',TF,'tf','srv')+txt('extra','Extra flags','Raw llama-server arguments.','--rope-freq-scale 0.5','srv')+`<div id="srvinfo" class="tst"></div><button class="btn full" id="p-info">Read live server info</button><button class="btn p full" id="p-apply">Apply &amp; restart server</button>`)+
+ grp('Server','needs restart',`<div class="note" style="margin:0 0 4px">These change how llama-server starts. Wrong flags can stop it; tap the screen after a failed start to reset.</div>`+num('ctx','Context size','Tokens of memory. Default 8192.','8192',512,131072,512,'int','srv')+num('threads','Threads','CPU threads for generation.','4',1,16,1,'int','srv')+num('threads_batch','Batch threads','Threads for prompt processing.','same',1,16,1,'int','srv')+num('batch','Batch size','Prompt batch (-b).','2048',32,8192,32,'int','srv')+num('ubatch','Micro-batch','Physical batch (-ub).','512',32,4096,32,'int','srv')+num('parallel','Slots','Parallel chats. Default 1.','1',1,8,1,'int','srv')+sel('fa','Flash attention','Faster, less memory. Needed for a quantized V cache. Default: on.',[['','Default (on)'],['auto','Auto'],['on','On'],['off','Off']],'str','srv')+sel('ctk','K cache type','Smaller = less memory. Default: q8_0.',[['','Default (q8_0)'],['f16','f16'],['q8_0','q8_0'],['q4_0','q4_0']],'str','srv')+sel('ctv','V cache type','Quantized needs flash attention. Default: q8_0.',[['','Default (q8_0)'],['f16','f16'],['q8_0','q8_0'],['q4_0','q4_0']],'str','srv')+sel('mlock','Lock in RAM','Stops the model being swapped out.',TF,'tf','srv')+sel('no_mmap','Disable mmap','Load the whole model into RAM.',TF,'tf','srv')+txt('extra','Extra flags','Raw llama-server arguments.','--rope-freq-scale 0.5','srv')+`<div id="srvinfo" class="tst"></div><button class="btn full" id="p-info">Read live server info</button><button class="btn p full" id="p-apply">Apply &amp; restart server</button>`)+
  `<button class="btn full dng" id="p-reset">Reset all power settings</button></div>`}
-function paneGen(){return`<div class="pane" data-p="gen"><div class="fi"><label>Server URL</label><input class="in" data-k="url" data-t="str" autocapitalize="off" autocorrect="off" spellcheck="false"></div><div class="r2"><button class="btn sm" id="s-test">Test connection</button></div><div class="tst" id="tst"></div>
-<div class="fi" style="margin-top:14px"><label>Context window <span style="color:var(--fg-3);font-weight:400">(-c) · needs restart</span></label>
+function paneGen(){return`<div class="pane" data-p="gen"><div class="fi"><label>Server URL${Q('url','Server URL','')}</label><input class="in" data-k="url" data-t="str" autocapitalize="off" autocorrect="off" spellcheck="false"></div><div class="r2"><button class="btn sm" id="s-test">Test connection</button></div><div class="tst" id="tst"></div>
+<div class="fi" style="margin-top:14px"><label>Context window <span style="color:var(--fg-3);font-weight:400">(-c) · needs restart</span>${Q('ctx','Context window','')}</label>
 <select class="in" id="ctx-slider" data-k="srv.ctx" data-t="int">
 <option value="">Default (8192)</option>
 <option value="2048">2048</option>
@@ -1842,9 +1946,9 @@ function paneGen(){return`<div class="pane" data-p="gen"><div class="fi"><label>
 <div class="r2" style="margin-top:8px"><button class="btn sm" id="ctx-restart">Restart with new context</button></div>
 <div class="tst" id="ctx-m"></div></div>
  <div class="set"><div class="lt">Theme</div><div class="seg" data-seg="theme"><button data-v="auto">Auto</button><button data-v="light">Light</button><button data-v="dark">Dark</button></div></div>
- <div class="sl"><div class="sl-h"><span>Temperature</span><b data-o="t"></b></div><input type="range" data-k="t" data-t="num" min="0" max="1.5" step=".05"></div>
- <div class="sl"><div class="sl-h"><span>Max tokens</span><b data-o="m"></b></div><input type="range" data-k="m" data-t="num" min="128" max="4096" step="128"></div>
- <div class="fi"><label>System prompt</label><textarea class="in" rows="3" data-k="sys" data-t="str"></textarea></div>
+ <div class="sl"><div class="sl-h"><span>Temperature${Q('t','Temperature','')}</span><b data-o="t"></b></div><input type="range" data-k="t" data-t="num" min="0" max="1.5" step=".05"></div>
+ <div class="sl"><div class="sl-h"><span>Max tokens${Q('m','Max tokens','')}</span><b data-o="m"></b></div><input type="range" data-k="m" data-t="num" min="128" max="4096" step="128"></div>
+ <div class="fi"><label>System prompt${Q('sys','System prompt','')}</label><textarea class="in" rows="3" data-k="sys" data-t="str"></textarea></div>
  ${sw('thoughts','Show model thoughts','When the model sends reasoning')}${sw('vision','Vision (Multimodal)','Enable image attachment for vision models (Gemma 3, Qwen-VL)')}${sw('power','Power user','Unlocks a tab with every parameter')}</div>`}
 function paneTools(){return`<div class="pane" data-p="tool"><div class="sec">Phone files</div>
  ${sw('files','File tools','List, find, read, write, edit, move, copy and delete')}
@@ -1960,19 +2064,19 @@ function paneTools(){return`<div class="pane" data-p="tool"><div class="sec">Pho
  <div class="tst" id="ocr-m"></div>
 
  <div class="sec">GitHub Integration</div>
- <div class="fi"><label>Personal Access Token (classic with repo scope)</label><input class="in" type="password" data-k="github.token" data-t="str" placeholder="ghp_..."></div>
- <div class="fi"><label>Default Repository (owner/repo)</label><input class="in" data-k="github.repo" data-t="str" placeholder="420garbage420/kojot"></div>
+ <div class="fi"><label>Personal Access Token (classic with repo scope)${Q('gh_token','GitHub token','')}</label><input class="in" type="password" data-k="github.token" data-t="str" placeholder="ghp_..."></div>
+ <div class="fi"><label>Default Repository (owner/repo)${Q('gh_repo','Default repository','')}</label><input class="in" data-k="github.repo" data-t="str" placeholder="420garbage420/kojot"></div>
  <div class="r2" style="margin-top:6px"><button class="btn sm" id="gh-test">Test Connection</button></div>
  <div class="tst" id="gh-m"></div>
 
  <div class="sec">Web search</div>${sw('search.on','Enable web search','Lets the model look things up')}
  <div class="set"><div class="seg" data-seg="search.prov">${Object.entries(PROV).map(([k,v])=>`<button data-v="${k}">${v.n}</button>`).join('')}</div></div>
- ${['tavily','brave','serper'].map(p=>`<div class="fi" data-prov="${p}"><label>${PROV[p].n} API key</label><input class="in" type="password" data-k="search.keys.${p}" data-t="str" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="${p==='tavily'?'tvly-…':'key'}"></div>`).join('')}
- <div class="fi" data-prov="searxng"><label>SearXNG base URL</label><input class="in" data-k="search.sx" data-t="str" autocapitalize="off" spellcheck="false" placeholder="https://searx.example.org"><small>JSON output must be enabled on the instance.</small></div>
- <div data-prov="custom"><div class="fi"><label>URL — use {query} and {n}</label><input class="in" data-k="search.cu" data-t="str" autocapitalize="off" spellcheck="false" placeholder="https://api.example.com/search?q={query}"></div>
+ ${['tavily','brave','serper'].map(p=>`<div class="fi" data-prov="${p}"><label>${PROV[p].n} API key${Q('search_key','Search API key','')}</label><input class="in" type="password" data-k="search.keys.${p}" data-t="str" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="${p==='tavily'?'tvly-…':'key'}"></div>`).join('')}
+ <div class="fi" data-prov="searxng"><label>SearXNG base URL${Q('search_sx','SearXNG URL','')}</label><input class="in" data-k="search.sx" data-t="str" autocapitalize="off" spellcheck="false" placeholder="https://searx.example.org"><small>JSON output must be enabled on the instance.</small></div>
+ <div data-prov="custom"><div class="fi"><label>URL — use {query} and {n}${Q('search_cu','Custom search URL','')}</label><input class="in" data-k="search.cu" data-t="str" autocapitalize="off" spellcheck="false" placeholder="https://api.example.com/search?q={query}"></div>
  <div class="set"><div class="lt">Method</div><div class="seg" data-seg="search.cm"><button data-v="GET">GET</button><button data-v="POST">POST</button></div></div>
- <div class="fi"><label>Headers (JSON)</label><textarea class="in" rows="2" data-k="search.ch" data-t="str" spellcheck="false" placeholder='{"Authorization":"Bearer KEY"}'></textarea></div>
- <div class="fi"><label>Body (POST) — use {query} and {n}</label><textarea class="in" rows="2" data-k="search.cb" data-t="str" spellcheck="false" placeholder='{"q":"{query}","num":{n}}'></textarea><small>Any JSON response works. The first list of results with a url and title is used.</small></div></div>
+ <div class="fi"><label>Headers (JSON)${Q('search_ch','Custom headers','')}</label><textarea class="in" rows="2" data-k="search.ch" data-t="str" spellcheck="false" placeholder='{"Authorization":"Bearer KEY"}'></textarea></div>
+ <div class="fi"><label>Body (POST) — use {query} and {n}${Q('search_cb','Custom POST body','')}</label><textarea class="in" rows="2" data-k="search.cb" data-t="str" spellcheck="false" placeholder='{"q":"{query}","num":{n}}'></textarea><small>Any JSON response works. The first list of results with a url and title is used.</small></div></div>
  <div class="set" data-prov="tavily"><div class="lt">Search depth</div><div class="seg" data-seg="search.depth"><button data-v="basic">Basic</button><button data-v="advanced">Advanced</button></div></div>
  ${num('max','Results per search','1 to 10','5',1,10,1,'int','search')}
  <button class="btn sm" id="ws-test">Test search</button><div class="tst" id="ws-m"></div></div>`}
@@ -2238,15 +2342,7 @@ const PDF = {
     this.toast('Loading libraries…');
     await this.ensureLibs();
     this.toast('Reading '+path.split('/').pop()+'…');
-    const r = J.parse(await nat('read_file_b64',{path}));
-    if(!r.data || !r.data.b64) throw Error(r.text || 'Could not read file');
-    const b64 = r.data.b64;
-    let raw;
-    try {
-      const bin = atob(b64);
-      raw = new Uint8Array(bin.length);
-      for(let i=0;i<bin.length;i++) raw[i]=bin.charCodeAt(i);
-    } catch(e){ throw Error('Invalid PDF data'); }
+    const raw = await readBytes(path);
     if(raw.length < 5 || String.fromCharCode(raw[0],raw[1],raw[2],raw[3]) !== '%PDF')
       throw Error('Not a PDF file');
 
@@ -2256,13 +2352,7 @@ const PDF = {
     $('#pdf-title').textContent = path.split('/').pop();
 
     // Viewer (pdf.js) — never touches the LLM
-    try{
-      this.doc = await pdfjsLib.getDocument({data: raw.slice()}).promise;
-    }catch(e){
-      // Worker failed (common on file/odd origins) — run on main thread
-      try{ pdfjsLib.GlobalWorkerOptions.workerSrc = ''; pdfjsLib.disableWorker = true; }catch(_){}
-      this.doc = await pdfjsLib.getDocument({data: raw.slice()}).promise;
-    }
+    this.doc = await pdfOpenDoc(raw.slice());
     // Editor (pdf-lib)
     if(typeof PDFLib==='undefined') throw Error('PDFLib is undefined — vendor/pdf-lib.min.js not served. Rebuild APK with www/vendor.');
     this.libDoc = await PDFLib.PDFDocument.load(raw.slice(), {ignoreEncryption:true, updateMetadata:false});
@@ -2276,41 +2366,59 @@ const PDF = {
   async renderPages(){
     const wrap = $('#pdf-pages');
     if(!wrap || !this.doc) return;
+    const gen = this._rg = (this._rg||0)+1;
+    if(this._io){ this._io.disconnect(); this._io2 && this._io2.disconnect(); this._io3 && this._io3.disconnect(); }
+    const scroller = $('#pdf-canvas-wrap') || null;
+    const keepTop = scroller ? scroller.scrollTop : 0;
     wrap.innerHTML = '';
-    const n = this.doc.numPages;
+    const doc = this.doc, n = doc.numPages;
     $('#pdf-page-lbl').textContent = '1 / '+n;
-    // Fit width: measure container
-    const cw = Math.max(280, ($('#pdf-canvas-wrap')?.clientWidth || 360) - 16);
-    for(let i=1;i<=Math.min(n,25);i++){
-      const page = await this.doc.getPage(i);
-      const base = page.getViewport({scale:1});
-      const scale = Math.min(2.2, cw / base.width);
-      const viewport = page.getViewport({scale});
-      const canvas = document.createElement('canvas');
-      const dpr = Math.min(window.devicePixelRatio||1, 2);
-      canvas.width = Math.floor(viewport.width * dpr);
-      canvas.height = Math.floor(viewport.height * dpr);
-      canvas.style.width = Math.floor(viewport.width)+'px';
-      canvas.style.height = Math.floor(viewport.height)+'px';
-      canvas.dataset.page = i;
-      const ctx = canvas.getContext('2d');
-      ctx.setTransform(dpr,0,0,dpr,0,0);
-      await page.render({canvasContext: ctx, viewport}).promise;
-      wrap.appendChild(canvas);
+    const cw = Math.max(280, (scroller?.clientWidth || 360) - 16);
+    const dpr = Math.min(window.devicePixelRatio||1, 2);
+    const p1 = await doc.getPage(1); const b1 = p1.getViewport({scale:1});
+    const fit = (vp)=>{ const scale = Math.min(2.2, cw / vp.width); return {scale, w:Math.floor(vp.width*scale), h:Math.floor(vp.height*scale)}; };
+    const s1 = fit(b1);
+    for(let i=1;i<=n;i++){
+      const d = document.createElement('div'); d.className='pdf-pg'; d.dataset.page=i;
+      d.style.cssText = 'width:'+s1.w+'px;max-width:100%;aspect-ratio:'+s1.w+'/'+s1.h;
+      wrap.appendChild(d);
     }
-    if(n>25){
-      const more=document.createElement('div');
-      more.className='hint'; more.style.cssText='color:var(--fg-3);font-size:12px;padding:8px';
-      more.textContent='Showing first 25 of '+n+' pages';
-      wrap.appendChild(more);
-    }
-    this.bindPageClicks();
+    if(scroller) scroller.scrollTop = keepTop;
+    const state = new Map(); const queue = []; let active = 0;
+    const pump = ()=>{ while(active<2 && queue.length){ const d=queue.pop(); active++;   /* newest first: that's where the user is looking */ renderSlot(d).finally(()=>{active--; pump();}); } };
+    const renderSlot = async (d)=>{
+      const i = +d.dataset.page; if(state.get(i)) return; state.set(i,'busy');
+      try{
+        const page = await doc.getPage(i); if(gen!==this._rg) return;
+        const {scale,w,h} = fit(page.getViewport({scale:1})); const vp = page.getViewport({scale});
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.floor(vp.width*dpr); canvas.height = Math.floor(vp.height*dpr);
+        canvas.style.width = Math.floor(vp.width)+'px'; canvas.style.height = Math.floor(vp.height)+'px'; canvas.dataset.page = i;
+        const ctx = canvas.getContext('2d'); ctx.setTransform(dpr,0,0,dpr,0,0);
+        await page.render({canvasContext: ctx, viewport: vp}).promise;
+        if(gen!==this._rg || state.get(i)!=='busy'){ canvas.width=0; canvas.height=0; state.delete(i); return; }
+        d.style.width = w+'px'; d.style.aspectRatio = w+'/'+h; d.replaceChildren(canvas);
+        this.bindCanvas(canvas); if(this.placeMode) canvas.classList.add('place-target');
+        state.set(i,'done');
+      }catch(e){ state.delete(i); }
+    };
+    const release = (d)=>{ const i=+d.dataset.page; const st=state.get(i);
+      if(st==='done'){ const c=d.querySelector('canvas'); if(c){ c.width=0; c.height=0; } d.replaceChildren(); }
+      if(st) state.delete(i); };
+    const opts = (m)=>({root: scroller, rootMargin: m+'px 0px '+m+'px 0px'});
+    this._io = new IntersectionObserver(es=>es.forEach(e=>{ if(e.isIntersecting){ const i=+e.target.dataset.page; if(!state.get(i) && !queue.includes(e.target)){ queue.push(e.target); pump(); } } else { const k=queue.indexOf(e.target); if(k>=0) queue.splice(k,1); } }), opts(1400));
+    this._io2 = new IntersectionObserver(es=>es.forEach(e=>{ if(!e.isIntersecting) release(e.target); }), opts(5000));
+    this._io3 = new IntersectionObserver(es=>es.forEach(e=>{ if(e.isIntersecting) $('#pdf-page-lbl').textContent = e.target.dataset.page+' / '+n; }), {root: scroller, rootMargin:'-45% 0px -45% 0px'});
+    wrap.querySelectorAll('.pdf-pg').forEach(d=>{ this._io.observe(d); this._io2.observe(d); this._io3.observe(d); });
   },
 
   bindPageClicks(){
     const wrap = $('#pdf-pages');
     if(!wrap) return;
-    wrap.querySelectorAll('canvas').forEach(canvas=>{
+    wrap.querySelectorAll('canvas').forEach(c=>this.bindCanvas(c));
+  },
+  bindCanvas(canvas){
+    {
       canvas.onclick = async (ev)=>{
         if(!this.placeMode) return;
         const pos = this.canvasToPdf(canvas, ev.clientX, ev.clientY);
@@ -2328,7 +2436,7 @@ const PDF = {
           this.closeSheet();
         }catch(e){ this.toast(String(e.message||e), true); }
       };
-    });
+    }
   },
 
   async refreshFields(){
@@ -2425,7 +2533,7 @@ const PDF = {
     this.path=path;
     $('#pdf-title').textContent = path.split('/').pop();
     this.bytes = u8;
-    this.doc = await pdfjsLib.getDocument({data: this.bytes.slice()}).promise;
+    this.doc = await pdfOpenDoc(this.bytes.slice());
     this.libDoc = await PDFLib.PDFDocument.load(this.bytes.slice(), {ignoreEncryption:true, updateMetadata:false});
     await this.renderPages();
     await this.refreshFields();
@@ -2660,11 +2768,8 @@ async function pdfTool(name, a){
   }
   if(name==='read_pdf_text'){
     await PDF.ensureLibs();
-    const r = J.parse(await nat('read_file_b64',{path:a.path}));
-    const bin = atob(r.data.b64);
-    const raw = new Uint8Array(bin.length);
-    for(let i=0;i<bin.length;i++) raw[i]=bin.charCodeAt(i);
-    const doc = await pdfjsLib.getDocument({data:raw}).promise;
+    const raw = await readBytes(a.path);
+    const doc = await pdfOpenDoc(raw);
     const max = Math.min(doc.numPages, a.max_pages||10);
     let text='';
     for(let i=1;i<=max;i++){
@@ -4028,11 +4133,8 @@ const Convert = {
       return r.text||'';
     }
     await PDF.ensureLibs();
-    const r=J.parse(await nat('read_file_b64',{path}));
-    const bin=atob(r.data.b64);
-    const raw=new Uint8Array(bin.length);
-    for(let i=0;i<bin.length;i++) raw[i]=bin.charCodeAt(i);
-    const doc=await pdfjsLib.getDocument({data:raw}).promise;
+    const raw=await readBytes(path);
+    const doc=await pdfOpenDoc(raw);
     const max=Math.min(doc.numPages, maxPages);
     let text='';
     for(let i=1;i<=max;i++){
@@ -4131,14 +4233,7 @@ const Convert = {
     return out;
   },
   async readWorkspaceBytes(path){
-    const raw=await nat('read_file_b64',{path});
-    const j=typeof raw==='string'?JSON.parse(raw):raw;
-    const b64=(j.data&&j.data.b64)||j.b64;
-    if(!b64) throw Error('Could not read file bytes');
-    const bin=atob(b64);
-    const u8=new Uint8Array(bin.length);
-    for(let i=0;i<bin.length;i++) u8[i]=bin.charCodeAt(i);
-    return u8.buffer;
+    return (await readBytes(path)).buffer;
   },
   async writeText(path, text){
     await nat('write_file',{path, content:text, overwrite:true});
@@ -4281,9 +4376,12 @@ const FV = {
     if(lower.endsWith('.html')||lower.endsWith('.htm')) convertBtns+=`<button class="btn sm" data-a="html-pdf">HTML → PDF</button>`;
     const acts=$('#fv-sheet-actions');
     acts.innerHTML=`
-      ${convertBtns}
-      <button class="btn sm" data-a="preview">Preview</button>
-      <button class="btn sm" data-a="open-ed">Open in Code Editor</button>
+      ${e.d?'':convertBtns}
+      ${e.d?'':'<button class="btn sm" data-a="preview">Preview</button><button class="btn sm" data-a="open-ed">Open in Code Editor</button>'}
+      <button class="btn sm" data-a="rename">Rename</button>
+      <button class="btn sm" data-a="copy">Copy</button>
+      <button class="btn sm" data-a="cut">Cut</button>
+      <button class="btn sm" data-a="copypath">Copy path</button>
       <button class="btn sm" data-a="gate">${gated?'Unblock for AI':'Block for AI'}</button>
       <button class="btn sm danger" data-a="delete">Delete</button>
       <button class="btn sm" data-a="cancel">Cancel</button>`;
@@ -4366,11 +4464,10 @@ const FV = {
         };
         try{
           if(/\.(png|jpe?g|webp|gif|svg)$/i.test(lower)){
-            const raw=await nat('read_file_b64',{path:e.p});
-            const j=JSON.parse(raw);
-            const b64=(j.data&&j.data.b64)||j.b64||'';
+            const imgBytes=await readBytes(e.p);
             const mime=lower.endsWith('.svg')?'image/svg+xml':'image/'+(lower.endsWith('.jpg')?'jpeg':lower.split('.').pop());
-            if(container) container.innerHTML=`<div style="display:grid;place-items:center;min-height:100%"><img src="data:${mime};base64,${b64}" style="max-width:100%;max-height:80vh;border-radius:8px;object-fit:contain" alt=""></div>`;
+            const imgUrl=URL.createObjectURL(new Blob([imgBytes],{type:mime}));
+            if(container) container.innerHTML=`<div style="display:grid;place-items:center;min-height:100%"><img src="${imgUrl}" style="max-width:100%;max-height:80vh;border-radius:8px;object-fit:contain" alt=""></div>`;
             currentRawText='[Image: '+e.p+']';
             return;
           }
@@ -4406,6 +4503,19 @@ const FV = {
         if(!await uiConfirm('Delete '+e.n+'?'))return;
         try{ await nat('delete',{path:e.p}); $('#fv-sheet').classList.remove('open'); this.render(); }
         catch(err){ alert(err.message||err) }
+      }
+      if(a==='rename'){
+        const nn=await uiPrompt('New name',e.n); if(!nn||nn===e.n)return;
+        try{ await nat('rename',{path:e.p,name:nn}); $('#fv-sheet').classList.remove('open'); this.cache&&this.cache.clear&&this.cache.clear(); this.render(); toast('Renamed to '+nn,'ok'); }
+        catch(err){ alert(err.message||err) }
+      }
+      if(a==='copy'||a==='cut'){
+        this.clipboard={mode:a,paths:[e.p]}; $('#fv-sheet').classList.remove('open'); this.syncBar();
+        toast((a==='copy'?'Copied ':'Cut ')+e.n+' — open a folder and tap Paste');
+      }
+      if(a==='copypath'){
+        try{ await navigator.clipboard.writeText(e.p); toast('Path copied'); }catch(_){ toast(e.p); }
+        $('#fv-sheet').classList.remove('open');
       }
     };
   },
