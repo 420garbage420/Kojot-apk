@@ -1015,17 +1015,17 @@ const FT=[
  fn('list_pdf_fields','List fillable form fields in a PDF (text, checkbox, dropdown). Opens the PDF in the form editor if needed.',{path:S('PDF path')},['path']),
  fn('fill_pdf_fields','Fill PDF form fields and save. fields is an array of {name, value} or {name, checked:true/false} for checkboxes. Optional out_path to write a copy.',{path:S('Source PDF path'),fields:P('array','Array of {name, value} or {name, checked}',{items:{type:'object'}}),out_path:S('Optional output path (default overwrites with _filled suffix)')},['path','fields']),
  fn('read_pdf_text','Extract text from a PDF: uses the text layer when present, otherwise suggests ocr_pdf for scans.',{path:S('PDF path'),max_pages:Nn('Max pages (default 10)')},['path'])];
-const WT=fn('web_search','Search the web for current information. Every result page is saved under web-cache/ in the workspace (full text when the provider returns it). Returns titles, urls, short snippets and the Saved path — use read_file on a Saved path for the full page.',{query:S('Search query'),max_results:Nn('1-10')},['query']);
+const WT=fn('web_search','Search the web for current information. Saves result pages under web-cache/ when content is available. Falls back to DuckDuckGo (no key) if the selected provider fails. Returns titles, urls, snippets and Saved paths — use read_file on a Saved path for the full page.',{query:S('Search query'),max_results:Nn('1-10')},['query']);
 const WT_WEB=fn('fetch_web','Fetch a public web page (SSRF-guarded). Converts HTML to readable text and saves under web-cache/ when enabled. Use for a known URL; use web_search to discover URLs first.',{url:S('Page URL (http/https)'),max_chars:Nn('Max characters to keep (default 12000)')},['url']);
-const WT_MAP=fn('map_site','List URLs under a site without downloading page bodies (Tavily map). Use before fetch_web/fetch_page to pick targets.',{url:S('Root site or docs URL'),limit:Nn('Max URLs (default 40)')},['url']);
-const WT_FETCH=fn('fetch_page','Fetch full page text for specific URLs (max 5) via Tavily extract and save each under web-cache/. Use after web_search when a snippet is too short (GitHub issues, docs, model cards, changelogs).',{urls:AR('One to five page URLs to fetch in full')},['urls']);
+const WT_MAP=fn('map_site','List URLs under a site without downloading page bodies. Uses Tavily map when a key is set, otherwise a local same-origin crawl. Use before fetch_web/fetch_page to pick targets.',{url:S('Root site or docs URL'),limit:Nn('Max URLs (default 40)')},['url']);
+const WT_FETCH=fn('fetch_page','Fetch full page text for specific URLs (max 5) and save each under web-cache/. Uses Tavily extract when a key is set, otherwise direct fetch. Use after web_search when a snippet is too short.',{urls:AR('One to five page URLs to fetch in full')},['urls']);
 const ASK=new Set(['forge_tool','delete_forged_tool','gh_commit','gh_create_pr','move','copy','delete','write_file','edit_file','fill_pdf_fields']);
-const searchReady=()=>{const p=PROV[cfg.search.prov];if(!p)return false;if(p.need==='none')return true;return p.need==='key'?!!cfg.search.keys[cfg.search.prov]:p.need==='sx'?!!cfg.search.sx:p.need==='cu'?!!cfg.search.cu:true};
+const searchReady=()=>{const key=cfg.search.prov==='direct'?'ddg':cfg.search.prov;const p=PROV[key]||PROV[cfg.search.prov];if(!p)return false;if(p.need==='none')return true;return p.need==='key'?!!cfg.search.keys[cfg.search.prov]:p.need==='sx'?!!cfg.search.sx:p.need==='cu'?!!cfg.search.cu:true};
 function tools(){
   const t=[];
   if(cfg.files&&NI)t.push(...FT);
   try{t.push(fn('identify_model','Identify the exact local GGUF (metadata + filename) and look it up on Hugging Face. Returns architecture, HF repo candidates, and recommended Power-user sampling. Set apply_preset=true to load recommendations; save_profile=true to store them for this model path.',{path:S('Optional GGUF path (default: bound chat model)'),name:S('Optional file name hint'),apply_preset:B('Apply recommended sampling to Power settings'),save_profile:B('Save profile for this model path')}));}catch(_){}
-  if(cfg.search.on&&searchReady()){if(cfg.search.prov!=='direct')t.push(WT);t.push(WT_WEB);if(cfg.search.prov==='tavily'&&cfg.search.keys.tavily){t.push(WT_FETCH);t.push(WT_MAP)}}
+  if(cfg.search.on){if(searchReady()||cfg.search.prov==='direct'||cfg.search.prov==='ddg'){t.push(WT)}t.push(WT_WEB);t.push(WT_MAP);t.push(WT_FETCH)}
   if(typeof GHT!=="undefined"&&cfg.github?.token?.trim())t.push(...GHT);
   if(typeof FORGE_TOOLS!=="undefined")t.push(...FORGE_TOOLS);
   if(typeof customTools!=="undefined"){
@@ -1058,14 +1058,64 @@ const kk=s=>s.keys[s.prov]||'';
 function generic(j){let best=null;(function w(o,d){if(!o||d>3||best)return;if(Array.isArray(o)){if(o.length&&typeof o[0]==='object'&&(o[0].url||o[0].link)){best=o;return}o.forEach(x=>w(x,d+1))}else if(typeof o==='object')Object.values(o).forEach(x=>w(x,d+1))})(j,0);
  return{answer:j.answer||(j.answer_box&&j.answer_box.answer),results:(best||[]).map(r=>({t:r.title||r.name,u:r.url||r.link,c:r.content||r.snippet||r.description||r.text||''}))}}
 const PROV={
- tavily:{n:'Tavily',need:'key',req:(q,n,s)=>({url:'https://api.tavily.com/search',method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+kk(s)},body:J.stringify({query:q,max_results:n,search_depth:s.depth,include_answer:true,include_raw_content:true})}),norm:j=>({answer:j.answer,results:(j.results||[]).map(r=>({t:r.title,u:r.url,c:r.content,raw:(r.raw_content&&String(r.raw_content).length>String(r.content||'').length)?r.raw_content:r.content}))})},
+ tavily:{n:'Tavily',need:'key',req:(q,n,s)=>({url:'https://api.tavily.com/search',method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+kk(s)},body:J.stringify({query:q,max_results:n,search_depth:s.depth||'basic',include_answer:true,include_raw_content:'markdown'})}),norm:j=>({answer:j.answer,results:(j.results||[]).map(r=>({t:r.title,u:r.url,c:r.content,raw:(r.raw_content&&String(r.raw_content).length>String(r.content||'').length)?r.raw_content:r.content}))})},
  brave:{n:'Brave',need:'key',req:(q,n,s)=>({url:'https://api.search.brave.com/res/v1/web/search?count='+n+'&q='+encodeURIComponent(q),method:'GET',headers:{Accept:'application/json','X-Subscription-Token':kk(s)}}),norm:j=>({results:((j.web||{}).results||[]).map(r=>({t:r.title,u:r.url,c:r.description}))})},
  serper:{n:'Serper',need:'key',req:(q,n,s)=>({url:'https://google.serper.dev/search',method:'POST',headers:{'Content-Type':'application/json','X-API-KEY':kk(s)},body:J.stringify({q,num:n})}),norm:j=>({answer:j.answerBox&&(j.answerBox.answer||j.answerBox.snippet),results:(j.organic||[]).map(r=>({t:r.title,u:r.link,c:r.snippet}))})},
  searxng:{n:'SearXNG',need:'sx',req:(q,n,s)=>({url:s.sx.replace(/\/$/,'')+'/search?format=json&q='+encodeURIComponent(q),method:'GET',headers:{}}),norm:j=>({answer:(j.answers||[])[0],results:(j.results||[]).map(r=>({t:r.title,u:r.url,c:r.content}))})},
  custom:{n:'Custom',need:'cu',req:(q,n,s)=>{let h={};try{h=J.parse(s.ch||'{}')}catch{}const f=t=>t.replace(/\{query\}/g,encodeURIComponent(q)).replace(/\{n\}/g,n);return{url:f(s.cu),method:s.cm,headers:h,body:s.cm==='GET'?'':(s.cb||'').replace(/\{query\}/g,J.stringify(q).slice(1,-1)).replace(/\{n\}/g,n)}},norm:generic},
+ ddg:{n:'DuckDuckGo',need:'none',req:null,norm:null},
  direct:{n:'Direct fetch',need:'none',req:null,norm:null}};
-async function httpx(r){if(window.Native)return J.parse(await nat('http',r));const x=await fetch(r.url,{method:r.method,headers:r.headers,body:r.method==='GET'?undefined:r.body});return{status:x.status,body:await x.text()}}
-async function webSearch(q,n){const s=cfg.search,p=PROV[s.prov];if(!q)throw Error('query is required');
+async function httpx(r){
+  if(window.Native)return J.parse(await nat('http',r));
+  const x=await fetch(r.url,{method:r.method||'GET',headers:r.headers||{},body:(r.method&&r.method!=='GET')?r.body:undefined});
+  return{status:x.status,body:await x.text(),final_url:x.url,content_type:x.headers.get('content-type')||''};
+}
+/** Parse DuckDuckGo HTML SERP into {t,u,c} results. No API key. */
+function parseDdgHtml(html,n){
+  const rs=[];const seen=new Set();
+  const re=/<a[^>]+class="[^"]*result__a[^"]*"[^>]+href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/gi;
+  let m;
+  while((m=re.exec(html))&&rs.length<n){
+    let href=m[1],title=m[2].replace(/<[^>]+>/g,'').replace(/&amp;/g,'&').replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/&quot;/g,'"').trim();
+    // DDG wraps redirects: //duckduckgo.com/l/?uddg=...
+    try{
+      if(/duckduckgo\.com\/l\/\?/.test(href)){
+        const u=new URL(href.startsWith('//')?'https:'+href:href);
+        href=decodeURIComponent(u.searchParams.get('uddg')||href);
+      }else if(href.startsWith('//'))href='https:'+href;
+    }catch(_){}
+    if(!/^https?:/i.test(href)||seen.has(href))continue;
+    seen.add(href);
+    // snippet: look ahead a bit for result__snippet
+    const tail=html.slice(m.index,m.index+1200);
+    const sm=tail.match(/class="[^"]*result__snippet[^"]*"[^>]*>([\s\S]*?)<\/(?:a|td|div)/i);
+    const snip=sm?sm[1].replace(/<[^>]+>/g,' ').replace(/\s+/g,' ').trim().slice(0,280):'';
+    rs.push({t:title||href,u:href,c:snip,raw:snip});
+  }
+  // Fallback: any organic-looking links if class names changed
+  if(!rs.length){
+    const re2=/<a[^>]+href="(https?:\/\/(?!duckduckgo\.com)[^"]+)"[^>]*>([\s\S]*?)<\/a>/gi;
+    while((m=re2.exec(html))&&rs.length<n){
+      const href=m[1],title=m[2].replace(/<[^>]+>/g,'').trim();
+      if(seen.has(href)||title.length<4)continue;
+      seen.add(href);
+      rs.push({t:title.slice(0,120),u:href,c:'',raw:''});
+    }
+  }
+  return rs;
+}
+async function ddgSearch(q,n){
+  const url='https://html.duckduckgo.com/html/?q='+encodeURIComponent(q);
+  const x=await httpx({url,method:'GET',headers:{
+    'User-Agent':'Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36',
+    'Accept':'text/html,application/xhtml+xml;q=0.9,*/*;q=0.8',
+    'Accept-Language':'en-US,en;q=0.9'
+  }});
+  if(x.status>=400)throw Error('DuckDuckGo HTTP '+x.status+': '+String(x.body||'').slice(0,120));
+  const rs=parseDdgHtml(String(x.body||''),n);
+  return{answer:null,results:rs,raw:rs.length?null:String(x.body||'').slice(0,800)};
+}
+async function webSearch(q,n){const s=cfg.search;if(!q)throw Error('query is required');
  n=Math.max(1,Math.min(+n||s.max,10));
  async function offlineFallback(reason){
    let facts='';
@@ -1073,17 +1123,50 @@ async function webSearch(q,n){const s=cfg.search,p=PROV[s.prov];if(!q)throw Erro
    const text=['[Offline / network unavailable — '+reason+']','Local memory related to "'+q+'":',facts||'(no matching local facts)'].join('\n');
    return{text,data:{answer:null,results:[],prov:'offline-memory',offline:true,reason,saved:[]}};
  }
- if(!searchReady())return offlineFallback('web search not configured');
- if(cfg.search.prov==='direct')return offlineFallback('Direct fetch is for fetch_web / specific URLs — pick Tavily, Brave, Serper, SearXNG or Custom for search');
+ // Direct = no search API; use DuckDuckGo HTML automatically
+ let provKey=s.prov;
+ if(provKey==='direct')provKey='ddg';
+ const p=PROV[provKey];
+ if(!p)return offlineFallback('unknown provider');
+ if(p.need==='key'&&!s.keys[provKey])return offlineFallback(p.n+' API key not set');
+ if(p.need==='sx'&&!s.sx)return offlineFallback('SearXNG URL not set');
+ if(p.need==='cu'&&!s.cu)return offlineFallback('Custom search URL not set');
  const prior=await searchLogFind(q,p.n); if(prior&&prior.paths&&prior.paths.length){const text=['[Dedup] Same query already searched via '+p.n+'. Use read_file on these paths or pass a new query:',...prior.paths.map((x,i)=>(i+1)+'. '+x)].join('\n');return{text,data:{answer:null,results:[],prov:p.n,dedup:true,saved:prior.paths.map(path=>({path}))}};}
- try{
+ async function runOnce(){
+   if(provKey==='ddg')return ddgSearch(q,n);
    const x=await httpx(p.req(q,n,s));
-   if(x.status>=400)throw Error(`${p.n} returned HTTP ${x.status}: ${x.body.slice(0,140)}`);
-   let j=null;try{j=J.parse(x.body)}catch{}const o=j?p.norm(j):{results:[],raw:x.body.slice(0,1500)};const rs=o.results.filter(r=>r.u).slice(0,n);
-   // Persist full page text into the workspace (like Quarry's ingest). OPFS is not available in the APK WebView,
-   // so we write plain files under web-cache/ which File Viewer and read_file can open.
+   if(x.status===429||x.status>=500){
+     // one retry after a short pause
+     await new Promise(r=>setTimeout(r,800));
+     const x2=await httpx(p.req(q,n,s));
+     if(x2.status>=400)throw Error(`${p.n} returned HTTP ${x2.status}: ${String(x2.body||'').slice(0,160)}`);
+     let j2=null;try{j2=J.parse(x2.body)}catch{}
+     return j2?p.norm(j2):{results:[],raw:String(x2.body||'').slice(0,1500)};
+   }
+   if(x.status>=400)throw Error(`${p.n} returned HTTP ${x.status}: ${String(x.body||'').slice(0,160)}`);
+   let j=null;try{j=J.parse(x.body)}catch{}
+   return j?p.norm(j):{results:[],raw:String(x.body||'').slice(0,1500)};
+ }
+ try{
+   const o=await runOnce();
+   const rs=(o.results||[]).filter(r=>r.u).slice(0,n);
+   // If paid provider returned nothing and DDG is available, soft-fallback
+   if(!rs.length&&provKey!=='ddg'&&navigator.onLine){
+     try{
+       const fb=await ddgSearch(q,n);
+       if(fb.results&&fb.results.length){
+         const saved=await saveWebPages(fb.results,q,'DuckDuckGo (fallback)');
+         const text=['[Fallback] '+p.n+' returned no results — used DuckDuckGo instead.',...fb.results.map((r,i)=>{
+           const path=saved[i]&&saved[i].path;const body=String(r.raw||r.c||'').slice(0,300);
+           return `${i+1}. ${r.t||r.u}\n${r.u}${path?'\nSaved: '+path:''}\n${body}`;
+         })].join('\n\n');
+         await searchLogPut({query:q,prov:'DuckDuckGo (fallback)',ts:Date.now(),paths:(saved||[]).filter(x=>x&&x.path).map(x=>x.path)});
+         return{text,data:{answer:null,results:fb.results.map((r,i)=>({t:r.t,u:r.u,c:String(r.c||'').slice(0,200),path:saved[i]&&saved[i].path||null})),prov:'DuckDuckGo (fallback)',saved:saved.filter(x=>x&&x.path)}};
+       }
+     }catch(_){}
+   }
    const saved=await saveWebPages(rs,q,p.n);
-   const text=[o.answer?'Answer: '+String(o.answer).slice(0,600):'',...rs.map((r,i)=>{
+   let text=[o.answer?'Answer: '+String(o.answer).slice(0,600):'',...rs.map((r,i)=>{
      const path=saved[i]&&saved[i].path;const body=String(r.raw||r.c||'').slice(0,300);
      return `${i+1}. ${r.t||r.u}\n${r.u}${path?'\nSaved: '+path:''}\n${body}`;
    }),!rs.length&&o.raw?o.raw:'',!rs.length&&!o.raw?'No results.':''].filter(Boolean).join('\n\n');
@@ -1092,6 +1175,20 @@ async function webSearch(q,n){const s=cfg.search,p=PROV[s.prov];if(!q)throw Erro
    return{text,data:{answer:o.answer&&String(o.answer).slice(0,600),results:rs.map((r,i)=>({t:r.t,u:r.u,c:String(r.c||'').slice(0,200),path:saved[i]&&saved[i].path||null,chars:saved[i]&&saved[i].chars||0})),prov:p.n,saved:saved.filter(x=>x&&x.path)}};
  }catch(e){
    const msg=String(e.message||e);
+   // Auto-fallback to DDG when Tavily/Brave/etc hard-fail (key, network, 4xx)
+   if(provKey!=='ddg'&&navigator.onLine){
+     try{
+       const fb=await ddgSearch(q,n);
+       if(fb.results&&fb.results.length){
+         const saved=await saveWebPages(fb.results,q,'DuckDuckGo (fallback)');
+         const text=['[Fallback after '+p.n+' error: '+msg.slice(0,80)+']',
+           ...fb.results.map((r,i)=>{const path=saved[i]&&saved[i].path;return `${i+1}. ${r.t||r.u}\n${r.u}${path?'\nSaved: '+path:''}\n${String(r.c||'').slice(0,300)}`;})
+         ].join('\n\n');
+         await searchLogPut({query:q,prov:'DuckDuckGo (fallback)',ts:Date.now(),paths:(saved||[]).filter(x=>x&&x.path).map(x=>x.path)});
+         return{text,data:{answer:null,results:fb.results.map((r,i)=>({t:r.t,u:r.u,c:String(r.c||'').slice(0,200),path:saved[i]&&saved[i].path||null})),prov:'DuckDuckGo (fallback)',saved:saved.filter(x=>x&&x.path),fallback_from:p.n,fallback_error:msg.slice(0,120)}};
+       }
+     }catch(_){}
+   }
    if(/network|failed to fetch|timeout|offline|DNS|unreachable|HTTP 0/i.test(msg)||!navigator.onLine)return offlineFallback(msg.slice(0,80));
    throw e;
  }
@@ -1124,7 +1221,6 @@ async function saveWebPages(rs,query,prov){
   }
   return out;
 }
-/** Fetch full page text for specific URLs (Tavily extract) and store under web-cache/. Max 5 URLs. */
 
 /** Client-side host blocklist (native layer also enforces SSRF on redirects). */
 function isBlockedHost(host){
@@ -1143,31 +1239,85 @@ function assertSafeUrl(url){
   if(isBlockedHost(u.hostname))throw Error('SSRF blocked: host '+u.hostname+' is not allowed');
   return u;
 }
+/** Prefer <article>/<main>/[role=main], then fall back to body. Strip chrome, keep structure. */
 function htmlToMd(html, maxChars){
   let s=String(html||'');
-  s=s.replace(/<script[\s\S]*?<\/script>/gi,' ').replace(/<style[\s\S]*?<\/style>/gi,' ');
-  s=s.replace(/<!--[\s\S]*?-->/g,' ');
+  // Drop non-content blocks early
+  s=s.replace(/<script[\s\S]*?<\/script>/gi,' ')
+     .replace(/<style[\s\S]*?<\/style>/gi,' ')
+     .replace(/<noscript[\s\S]*?<\/noscript>/gi,' ')
+     .replace(/<svg[\s\S]*?<\/svg>/gi,' ')
+     .replace(/<!--[\s\S]*?-->/g,' ');
+  // Prefer main content regions when present
+  const mainMatch=s.match(/<(article|main)[^>]*>([\s\S]*?)<\/\1>/i)
+    ||s.match(/<div[^>]+role=["']main["'][^>]*>([\s\S]*?)<\/div>/i);
+  if(mainMatch){
+    const candidate=mainMatch[2]||mainMatch[1];
+    if(candidate&&candidate.replace(/<[^>]+>/g,' ').trim().length>200)s=candidate;
+  }else{
+    // Strip common chrome
+    s=s.replace(/<(nav|header|footer|aside|form)[^>]*>[\s\S]*?<\/\1>/gi,' ');
+  }
   s=s.replace(/<(h[1-6])[^>]*>([\s\S]*?)<\/\1>/gi,(_,t,b)=>'\n\n'+'#'.repeat(+t[1])+' '+b.replace(/<[^>]+>/g,'').trim()+'\n\n');
   s=s.replace(/<li[^>]*>([\s\S]*?)<\/li>/gi,(_,b)=>'- '+b.replace(/<[^>]+>/g,'').trim()+'\n');
-  s=s.replace(/<br\s*\/?>/gi,'\n').replace(/<\/p>/gi,'\n\n').replace(/<\/div>/gi,'\n');
-  s=s.replace(/<a[^>]+href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi,(_,h,b)=>`[${b.replace(/<[^>]+>/g,'').trim()}](${h})`);
+  s=s.replace(/<(pre|code)[^>]*>([\s\S]*?)<\/\1>/gi,(_,t,b)=>'\n```\n'+b.replace(/<[^>]+>/g,'').trim()+'\n```\n');
+  s=s.replace(/<br\s*\/?>/gi,'\n').replace(/<\/p>/gi,'\n\n').replace(/<\/div>/gi,'\n').replace(/<\/tr>/gi,'\n');
+  s=s.replace(/<a[^>]+href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi,(_,h,b)=>{
+    const label=b.replace(/<[^>]+>/g,'').trim();
+    if(!label)return '';
+    try{const abs=new URL(h, 'https://example.invalid').href; if(abs.startsWith('http'))return `[${label}](${h})`;}catch(_){}
+    return label;
+  });
+  s=s.replace(/<img[^>]+alt=["']([^"']+)["'][^>]*>/gi,(_,a)=>a?`![${a}]`:'');
   s=s.replace(/<[^>]+>/g,' ');
-  s=s.replace(/&nbsp;/g,' ').replace(/&amp;/g,'&').replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/&quot;/g,'"').replace(/&#39;/g,"'");
-  s=s.replace(/[ \t]+\n/g,'\n').replace(/\n{3,}/g,'\n\n').trim();
+  s=s.replace(/&nbsp;/g,' ').replace(/&amp;/g,'&').replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/&quot;/g,'"').replace(/&#39;/g,"'").replace(/&#x27;/g,"'");
+  s=s.replace(/[ \t]+\n/g,'\n').replace(/\n{3,}/g,'\n\n').replace(/[ \t]{2,}/g,' ').trim();
   return s.slice(0, maxChars||12000);
+}
+/** Extract same-origin http(s) links from an HTML page. */
+function extractLinks(html, baseUrl, sameOriginOnly){
+  const out=[], seen=new Set();
+  let origin='', host='';
+  try{const b=new URL(baseUrl);origin=b.origin;host=b.hostname.toLowerCase()}catch(_){return out}
+  const re=/<a[^>]+href=["']([^"'#]+)["']/gi;
+  let m;
+  while((m=re.exec(html))&&out.length<80){
+    let href=m[1].trim();
+    if(!href||/^(mailto|javascript|tel|data):/i.test(href))continue;
+    try{
+      const u=new URL(href, baseUrl);
+      if(u.protocol!=='http:'&&u.protocol!=='https:')continue;
+      u.hash='';
+      const hrefAbs=u.href;
+      if(seen.has(hrefAbs))continue;
+      if(sameOriginOnly){
+        const h=u.hostname.toLowerCase();
+        if(h!==host&&!h.endsWith('.'+host))continue;
+      }
+      if(isBlockedHost(u.hostname))continue;
+      seen.add(hrefAbs);
+      out.push(hrefAbs);
+    }catch(_){}
+  }
+  return out;
 }
 async function fetchWebPage(url, opts={}){
   const u=assertSafeUrl(url);
   const maxChars=Math.max(500, Math.min(+(opts.max_chars||12000), 100000));
   if(!window.Native)throw Error('Direct fetch needs the Android app (native HTTP with SSRF guards)');
-  const x=await httpx({url:u.href, method:'GET', headers:{'User-Agent':'Kojot-fetch/1.0','Accept':'text/html,application/xhtml+xml,text/plain;q=0.9,*/*;q=0.8'}});
-  if(x.status>=400)throw Error(`HTTP ${x.status} for ${u.href}`);
+  const x=await httpx({url:u.href, method:'GET', headers:{
+    'User-Agent':'Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36 Kojot/1.0',
+    'Accept':'text/html,application/xhtml+xml,application/xml;q=0.9,text/plain;q=0.8,*/*;q=0.7',
+    'Accept-Language':'en-US,en;q=0.9'
+  }});
+  if(x.status>=400)throw Error(`HTTP ${x.status} for ${u.href}: ${String(x.body||'').slice(0,100)}`);
   const finalUrl=x.final_url||u.href;
   try{assertSafeUrl(finalUrl)}catch(e){throw Error('SSRF blocked after redirect: '+e.message)}
   const body=String(x.body||'');
-  const isHtml=/<html|<body|<!doctype html/i.test(body.slice(0,2000));
+  const isHtml=/<html|<body|<!doctype html/i.test(body.slice(0,2000))||/text\/html/i.test(x.content_type||'');
   const text=isHtml?htmlToMd(body,maxChars):body.slice(0,maxChars);
-  const rs=[{t:(text.split('\n').find(l=>l.trim())||finalUrl).replace(/^#+\s*/,'').slice(0,120), u:finalUrl, c:text, raw:text}];
+  const title=(text.split('\n').find(l=>l.trim())||finalUrl).replace(/^#+\s*/,'').slice(0,120);
+  const rs=[{t:title, u:finalUrl, c:text, raw:text}];
   let saved=null;
   if(cfg.search.save_pages!==false){
     const out=await saveWebPages(rs,'fetch_web','Direct fetch');
@@ -1176,17 +1326,66 @@ async function fetchWebPage(url, opts={}){
   const path=saved&&saved.path;
   return{text:[`Fetched ${finalUrl} (${text.length} chars)`+(path?'\nSaved: '+path:''), text.slice(0,4000)+(text.length>4000?'\n…':'')].join('\n\n'), data:{url:finalUrl, path:path||null, chars:text.length, prov:'Direct fetch', saved:path?[saved]:[]}};
 }
+/** Local BFS link map when Tavily is unavailable. Depth 0 = root only links; depth 1 = one hop. */
+async function localMapSite(url, limit=40, depth=1){
+  limit=Math.max(1,Math.min(+limit||40,100));
+  depth=Math.max(0,Math.min(+depth||1,2));
+  const root=assertSafeUrl(url).href;
+  const seen=new Set([root]);
+  const found=[root];
+  const queue=[{url:root,d:0}];
+  while(queue.length&&found.length<limit){
+    const {url:cur,d}=queue.shift();
+    if(d>depth)continue;
+    try{
+      const x=await httpx({url:cur,method:'GET',headers:{
+        'User-Agent':'Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36 Kojot/1.0',
+        'Accept':'text/html,application/xhtml+xml;q=0.9,*/*;q=0.8'
+      }});
+      if(x.status>=400)continue;
+      const links=extractLinks(String(x.body||''), x.final_url||cur, true);
+      for(const link of links){
+        if(seen.has(link)||found.length>=limit)continue;
+        seen.add(link);
+        found.push(link);
+        if(d+1<=depth)queue.push({url:link,d:d+1});
+      }
+    }catch(_){}
+  }
+  return found;
+}
 async function mapSite(url, limit=40){
   const s=cfg.search;
-  if(s.prov!=='tavily'||!s.keys.tavily)throw Error('map_site needs Tavily (Settings → Web search → Tavily)');
   limit=Math.max(1,Math.min(+limit||40,100));
-  const x=await httpx({url:'https://api.tavily.com/map',method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+s.keys.tavily},body:J.stringify({url, limit})});
-  if(x.status>=400)throw Error(`Tavily map HTTP ${x.status}: ${x.body.slice(0,140)}`);
-  let j=null;try{j=J.parse(x.body)}catch{}
-  const urls=(j&&(j.results||j.urls))||[];
-  const list=Array.isArray(urls)?urls.map(u=>typeof u==='string'?u:(u.url||'')).filter(Boolean):[];
-  const text=list.length?list.slice(0,80).map((u,i)=>(i+1)+'. '+u).join('\n'):'No URLs returned.';
-  return{text:`Mapped ${list.length} URL(s) under ${url}\n\n${text}`, data:{urls:list.slice(0,100), total:list.length, prov:'Tavily map'}};
+  // Prefer Tavily map when key is present
+  if(s.keys&&s.keys.tavily){
+    try{
+      const x=await httpx({url:'https://api.tavily.com/map',method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+s.keys.tavily},body:J.stringify({url, limit})});
+      if(x.status<400){
+        let j=null;try{j=J.parse(x.body)}catch{}
+        const urls=(j&&(j.results||j.urls))||[];
+        const list=Array.isArray(urls)?urls.map(u=>typeof u==='string'?u:(u.url||'')).filter(Boolean):[];
+        if(list.length){
+          const text=list.slice(0,80).map((u,i)=>(i+1)+'. '+u).join('\n');
+          return{text:`Mapped ${list.length} URL(s) under ${url} (Tavily)\n\n${text}`, data:{urls:list.slice(0,100), total:list.length, prov:'Tavily map'}};
+        }
+      }
+    }catch(_){}
+  }
+  // Local BFS fallback
+  if(!window.Native)throw Error('map_site needs the Android app (or a Tavily key)');
+  const list=await localMapSite(url, limit, 1);
+  const text=list.length?list.slice(0,80).map((u,i)=>(i+1)+'. '+u).join('\n'):'No URLs found.';
+  // Persist map for later pull
+  try{
+    await nat('make_dir',{path:'web-cache'});
+    const host=(new URL(url)).hostname.replace(/^www\./,'');
+    const path=`web-cache/${host}-map-${Date.now().toString(36)}.json`;
+    await nat('write_file',{path,content:J.stringify({url,total:list.length,urls:list,prov:'local-map',saved:new Date().toISOString()},null,2),overwrite:true});
+    return{text:`Mapped ${list.length} URL(s) under ${url} (local)\nSaved: ${path}\n\n${text}`, data:{urls:list.slice(0,100), total:list.length, prov:'local-map', path}};
+  }catch(_){
+    return{text:`Mapped ${list.length} URL(s) under ${url} (local)\n\n${text}`, data:{urls:list.slice(0,100), total:list.length, prov:'local-map'}};
+  }
 }
 async function searchLogGet(){
   try{const r=J.parse(await nat('read_file',{path:'web-cache/_searches.json',max_chars:200000}));const raw=r.text||(r.data&&r.data.text)||'';return J.parse(raw)}catch{return{entries:[]}}
@@ -1204,16 +1403,36 @@ async function fetchPages(urls){
   const list=[].concat(urls||[]).map(u=>String(u||'').trim()).filter(Boolean).slice(0,5);
   if(!list.length)throw Error('urls is required (1-5)');
   const s=cfg.search;
-  if(s.prov!=='tavily'||!s.keys.tavily)throw Error('fetch_page needs the Tavily provider and API key (Settings → Web search)');
-  const x=await httpx({url:'https://api.tavily.com/extract',method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+s.keys.tavily},body:J.stringify({urls:list,extract_depth:s.depth||'basic',format:'markdown'})});
-  if(x.status>=400)throw Error(`Tavily extract HTTP ${x.status}: ${x.body.slice(0,140)}`);
-  let j=null;try{j=J.parse(x.body)}catch{}const rs=(j&&j.results||[]).map(r=>({t:(r.raw_content||'').split('\n').find(l=>l.trim())||r.url,u:r.url,c:r.raw_content||'',raw:r.raw_content||''}));
-  const failed=(j&&j.failed_results||[]).map(f=>({u:f.url,error:String(f.error||'').slice(0,120)}));
-  const saved=await saveWebPages(rs,'extract', 'Tavily extract');
-  const lines=rs.map((r,i)=>{const p=saved[i]&&saved[i].path;return `${i+1}. ${r.u}${p?'\nSaved: '+p+' ('+(saved[i].chars||0)+' chars)':'\n(not saved)'}`});
+  // Prefer Tavily extract; otherwise sequential direct fetch
+  if(s.keys&&s.keys.tavily){
+    try{
+      const x=await httpx({url:'https://api.tavily.com/extract',method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+s.keys.tavily},body:J.stringify({urls:list,extract_depth:s.depth||'basic',format:'markdown'})});
+      if(x.status<400){
+        let j=null;try{j=J.parse(x.body)}catch{}
+        const rs=(j&&j.results||[]).map(r=>({t:(r.raw_content||'').split('\n').find(l=>l.trim())||r.url,u:r.url,c:r.raw_content||'',raw:r.raw_content||''}));
+        const failed=(j&&j.failed_results||[]).map(f=>({u:f.url,error:String(f.error||'').slice(0,120)}));
+        if(rs.length){
+          const saved=await saveWebPages(rs,'extract', 'Tavily extract');
+          const lines=rs.map((r,i)=>{const p=saved[i]&&saved[i].path;return `${i+1}. ${r.u}${p?'\nSaved: '+p+' ('+(saved[i].chars||0)+' chars)':'\n(not saved)'}`});
+          if(failed.length)lines.push('Failed: '+failed.map(f=>f.u+' — '+f.error).join('; '));
+          return{text:lines.join('\n\n'),data:{results:rs.map((r,i)=>({t:r.t,u:r.u,path:saved[i]&&saved[i].path||null,chars:saved[i]&&saved[i].chars||0})),failed,prov:'Tavily extract',saved:saved.filter(x=>x&&x.path)}};
+        }
+      }
+    }catch(_){}
+  }
+  // Direct multi-fetch fallback
+  const results=[], failed=[], saved=[];
+  for(const u of list){
+    try{
+      const r=await fetchWebPage(u,{max_chars:20000});
+      results.push({t:r.data.url,u:r.data.url,path:r.data.path,chars:r.data.chars});
+      if(r.data.path)saved.push({path:r.data.path,url:r.data.url,chars:r.data.chars});
+    }catch(e){failed.push({u,error:String(e.message||e).slice(0,120)})}
+  }
+  const lines=results.map((r,i)=>`${i+1}. ${r.u}${r.path?'\nSaved: '+r.path+' ('+r.chars+' chars)':''}`);
   if(failed.length)lines.push('Failed: '+failed.map(f=>f.u+' — '+f.error).join('; '));
-  if(!rs.length&&!failed.length)lines.push('No content returned.');
-  return{text:lines.join('\n\n'),data:{results:rs.map((r,i)=>({t:r.t,u:r.u,path:saved[i]&&saved[i].path||null,chars:saved[i]&&saved[i].chars||0})),failed,prov:'Tavily extract',saved:saved.filter(x=>x&&x.path)}};
+  if(!results.length&&!failed.length)lines.push('No content returned.');
+  return{text:lines.join('\n\n'),data:{results,failed,prov:'Direct fetch',saved}};
 }
 
 /* ---------- tool cards ---------- */
@@ -2368,7 +2587,7 @@ function paneTools(){return`<div class="pane" data-p="tool"><div class="sec">Pho
  <div class="fi"><label>Body (POST) — use {query} and {n}${Q('search_cb','Custom POST body','')}</label><textarea class="in" rows="2" data-k="search.cb" data-t="str" spellcheck="false" placeholder='{"q":"{query}","num":{n}}'></textarea><small>Any JSON response works. The first list of results with a url and title is used.</small></div></div>
  <div class="set" data-prov="tavily"><div class="lt">Search depth</div><div class="seg" data-seg="search.depth"><button data-v="basic">Basic</button><button data-v="advanced">Advanced</button></div></div>
  ${num('max','Results per search','1 to 10','5',1,10,1,'int','search')}
- <div data-prov="direct" class="note" style="margin:8px 0">Direct fetch: no search API. The agent uses <b>fetch_web</b> on public http(s) URLs (SSRF-blocked for private/localhost/metadata). Pair with Tavily if you also need search + map_site.</div>
+ <div data-prov="direct ddg" class="note" style="margin:8px 0">DuckDuckGo / Direct: <b>no API key</b>. Search uses DuckDuckGo HTML; <b>fetch_web</b> loads public http(s) pages (SSRF-blocked for private/localhost/metadata). map_site and fetch_page work locally too; add a Tavily key for richer extract/map.</div>
  ${sw('search.save_pages','Save pages to web-cache/','Store full text under web-cache/ for later read_file')}
  ${sw('search.dedup','Dedup searches & pages','Skip identical search queries and skip rewriting unchanged pages')}
  <button class="btn sm" id="ws-test">Test search</button><div class="tst" id="ws-m"></div></div>`}

@@ -28,10 +28,15 @@ import android.widget.FrameLayout
 import android.widget.TextView
 import org.json.JSONArray
 import org.json.JSONObject
+import java.io.BufferedInputStream
 import java.io.ByteArrayInputStream
 import java.io.File
+import java.io.InputStream
 import java.net.HttpURLConnection
 import java.net.URL
+import java.util.zip.GZIPInputStream
+import java.util.zip.Inflater
+import java.util.zip.InflaterInputStream
 import kotlin.concurrent.thread
 
 class MainActivity : Activity() {
@@ -891,21 +896,44 @@ class MainActivity : Activity() {
         return u
     }
 
+    /** Decode gzip / deflate response bodies when the server (or our Accept-Encoding) compressed them. */
+    private fun decodeHttpStream(raw: InputStream?, encoding: String?): InputStream? {
+        if (raw == null) return null
+        val enc = (encoding ?: "").lowercase()
+        return try {
+            when {
+                enc.contains("gzip") -> GZIPInputStream(BufferedInputStream(raw))
+                enc.contains("deflate") -> InflaterInputStream(BufferedInputStream(raw), Inflater(true))
+                else -> BufferedInputStream(raw)
+            }
+        } catch (_: Exception) {
+            BufferedInputStream(raw)
+        }
+    }
+
     private fun http(a: JSONObject): JSONObject {
         val u = assertPublicHttpUrl(a.getString("url"))
         // Re-check after redirects by disabling auto-follow and walking manually
         var current = u
         var redirects = 0
         var last: HttpURLConnection? = null
+        val method = a.optString("method", "GET").uppercase()
+        val hdrs = a.optJSONObject("headers")
         while (redirects <= 5) {
             val c = current.openConnection() as HttpURLConnection
             c.instanceFollowRedirects = false
-            c.requestMethod = a.optString("method", "GET").uppercase()
-            c.connectTimeout = 15000; c.readTimeout = 25000
-            a.optJSONObject("headers")?.let { h -> h.keys().forEach { k -> c.setRequestProperty(k, h.optString(k)) } }
+            c.requestMethod = method
+            c.connectTimeout = 15000; c.readTimeout = 30000
+            // Sensible defaults; caller headers override
+            c.setRequestProperty("User-Agent", "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36 Kojot/1.0")
+            c.setRequestProperty("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,application/json,text/plain;q=0.8,*/*;q=0.7")
+            c.setRequestProperty("Accept-Language", "en-US,en;q=0.9")
+            c.setRequestProperty("Accept-Encoding", "gzip, deflate")
+            c.setRequestProperty("Connection", "close")
+            hdrs?.keys()?.forEach { k -> c.setRequestProperty(k, hdrs.optString(k)) }
             if (redirects == 0) {
                 val body = a.optString("body", "")
-                if (body.isNotEmpty() && c.requestMethod != "GET") {
+                if (body.isNotEmpty() && method != "GET" && method != "HEAD") {
                     c.doOutput = true
                     c.outputStream.use { it.write(body.toByteArray(Charsets.UTF_8)) }
                 }
@@ -926,13 +954,25 @@ class MainActivity : Activity() {
         }
         val c = last ?: throw ToolError("too many redirects")
         val code = c.responseCode
-        val st = if (code >= 400) c.errorStream else c.inputStream
-        val txt = st?.bufferedReader()?.use { r ->
+        val encoding = c.getHeaderField("Content-Encoding")
+        val st = decodeHttpStream(if (code >= 400) c.errorStream else c.inputStream, encoding)
+        val charset = try {
+            val ct = c.contentType ?: ""
+            val m = Regex("charset=([\\w-]+)", RegexOption.IGNORE_CASE).find(ct)
+            m?.groupValues?.get(1) ?: "UTF-8"
+        } catch (_: Exception) { "UTF-8" }
+        val txt = st?.bufferedReader(charset(charset))?.use { r ->
             val sb = StringBuilder(); val buf = CharArray(8192); var n: Int
-            while (r.read(buf).also { n = it } > 0 && sb.length < 300_000) sb.append(buf, 0, n)
+            // Cap at ~400 KB decoded text — enough for articles, keeps heap calm
+            while (r.read(buf).also { n = it } > 0 && sb.length < 400_000) sb.append(buf, 0, n)
             sb.toString()
         } ?: ""
-        return JSONObject().put("status", code).put("body", txt).put("final_url", current.toString())
+        return JSONObject()
+            .put("status", code)
+            .put("body", txt)
+            .put("final_url", current.toString())
+            .put("content_type", c.contentType ?: "")
+            .put("encoding", encoding ?: "")
     }
 
     private val memoryOps = setOf(
