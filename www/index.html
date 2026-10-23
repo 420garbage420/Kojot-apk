@@ -659,7 +659,7 @@ textarea.in{height:auto;min-height:64px;padding:9px 12px;font:13px/19px var(--mo
 </div></div>
 <script>
 const $=s=>document.querySelector(s),LS=localStorage,J=JSON;
-const DEF={url:'http://127.0.0.1:8080',sys:'You are a helpful, concise assistant.',t:.7,m:1024,theme:'auto',power:false,thoughts:true,vision:false,coder_t:0.1,p_coder:{},srv_coder:{},xj_coder:'',files:true,ask:true,github:{token:'',repo:'420garbage420/kojot'},search:{on:true,prov:'tavily',keys:{},max:5,depth:'basic',sx:'',cu:'',cm:'GET',ch:'',cb:''},p:{},srv:{},xj:'',project:{name:'',conventions:''},profile:'balanced',auto_coder:false,tool_cache:true,mem_auto:true,file_gates:[],ocr_engine:'mlkit',ocr_path:'',ext_models:{}};
+const DEF={url:'http://127.0.0.1:8080',sys:'You are a helpful, concise assistant.',t:.7,m:1024,theme:'auto',power:false,thoughts:true,vision:false,coder_t:0.1,p_coder:{},srv_coder:{},xj_coder:'',files:true,ask:true,github:{token:'',repo:'420garbage420/kojot'},search:{on:true,prov:'tavily',keys:{},max:5,depth:'basic',sx:'',cu:'',cm:'GET',ch:'',cb:'',save_pages:true,dedup:true},p:{},srv:{},xj:'',project:{name:'',conventions:''},profile:'balanced',auto_coder:false,tool_cache:true,mem_auto:true,file_gates:[],ocr_engine:'mlkit',ocr_path:'',ext_models:{},model_profiles:{},model_profile_key:''};
 const saved=(()=>{try{return J.parse(LS.getItem('lc.cfg')||'{}')}catch{return{}}})();
 const cfg={...DEF,...saved,search:{...DEF.search,...saved.search,keys:{...(saved.search||{}).keys}},p:{...saved.p},srv:{...saved.srv}};
 if(cfg.xj && (cfg.xj.includes('enable_thinking') || cfg.xj.includes('qwen')) && !cfg.xj_coder){
@@ -825,7 +825,7 @@ const Cap = {
 
   // --- Tool result cache (read-only tools) ---
   _cache:new Map(),
-  CACHEABLE:new Set(['list_dir','find_files','read_file','list_facts','memory_stats','get_user_anchor','recall_memory','recall_files','pdf_info','list_pdf_fields']),
+  CACHEABLE:new Set(['list_dir','find_files','read_file','list_facts','memory_stats','get_user_anchor','recall_memory','recall_files','pdf_info','list_pdf_fields','map_site']),
   cacheKey(name,args){try{return name+'|'+J.stringify(args||{})}catch{return name}},
   getCached(name,args){
     if(!cfg.tool_cache||!this.CACHEABLE.has(name))return null;
@@ -1016,13 +1016,16 @@ const FT=[
  fn('fill_pdf_fields','Fill PDF form fields and save. fields is an array of {name, value} or {name, checked:true/false} for checkboxes. Optional out_path to write a copy.',{path:S('Source PDF path'),fields:P('array','Array of {name, value} or {name, checked}',{items:{type:'object'}}),out_path:S('Optional output path (default overwrites with _filled suffix)')},['path','fields']),
  fn('read_pdf_text','Extract text from a PDF: uses the text layer when present, otherwise suggests ocr_pdf for scans.',{path:S('PDF path'),max_pages:Nn('Max pages (default 10)')},['path'])];
 const WT=fn('web_search','Search the web for current information. Every result page is saved under web-cache/ in the workspace (full text when the provider returns it). Returns titles, urls, short snippets and the Saved path — use read_file on a Saved path for the full page.',{query:S('Search query'),max_results:Nn('1-10')},['query']);
+const WT_WEB=fn('fetch_web','Fetch a public web page (SSRF-guarded). Converts HTML to readable text and saves under web-cache/ when enabled. Use for a known URL; use web_search to discover URLs first.',{url:S('Page URL (http/https)'),max_chars:Nn('Max characters to keep (default 12000)')},['url']);
+const WT_MAP=fn('map_site','List URLs under a site without downloading page bodies (Tavily map). Use before fetch_web/fetch_page to pick targets.',{url:S('Root site or docs URL'),limit:Nn('Max URLs (default 40)')},['url']);
 const WT_FETCH=fn('fetch_page','Fetch full page text for specific URLs (max 5) via Tavily extract and save each under web-cache/. Use after web_search when a snippet is too short (GitHub issues, docs, model cards, changelogs).',{urls:AR('One to five page URLs to fetch in full')},['urls']);
 const ASK=new Set(['forge_tool','delete_forged_tool','gh_commit','gh_create_pr','move','copy','delete','write_file','edit_file','fill_pdf_fields']);
-const searchReady=()=>{const p=PROV[cfg.search.prov];return p&&(p.need==='key'?!!cfg.search.keys[cfg.search.prov]:p.need==='sx'?!!cfg.search.sx:p.need==='cu'?!!cfg.search.cu:true)};
+const searchReady=()=>{const p=PROV[cfg.search.prov];if(!p)return false;if(p.need==='none')return true;return p.need==='key'?!!cfg.search.keys[cfg.search.prov]:p.need==='sx'?!!cfg.search.sx:p.need==='cu'?!!cfg.search.cu:true};
 function tools(){
   const t=[];
   if(cfg.files&&NI)t.push(...FT);
-  if(cfg.search.on&&searchReady()){t.push(WT);if(cfg.search.prov==='tavily'&&cfg.search.keys.tavily)t.push(WT_FETCH)}
+  try{t.push(fn('identify_model','Identify the exact local GGUF (metadata + filename) and look it up on Hugging Face. Returns architecture, HF repo candidates, and recommended Power-user sampling. Set apply_preset=true to load recommendations; save_profile=true to store them for this model path.',{path:S('Optional GGUF path (default: bound chat model)'),name:S('Optional file name hint'),apply_preset:B('Apply recommended sampling to Power settings'),save_profile:B('Save profile for this model path')}));}catch(_){}
+  if(cfg.search.on&&searchReady()){if(cfg.search.prov!=='direct')t.push(WT);t.push(WT_WEB);if(cfg.search.prov==='tavily'&&cfg.search.keys.tavily){t.push(WT_FETCH);t.push(WT_MAP)}}
   if(typeof GHT!=="undefined"&&cfg.github?.token?.trim())t.push(...GHT);
   if(typeof FORGE_TOOLS!=="undefined")t.push(...FORGE_TOOLS);
   if(typeof customTools!=="undefined"){
@@ -1059,7 +1062,8 @@ const PROV={
  brave:{n:'Brave',need:'key',req:(q,n,s)=>({url:'https://api.search.brave.com/res/v1/web/search?count='+n+'&q='+encodeURIComponent(q),method:'GET',headers:{Accept:'application/json','X-Subscription-Token':kk(s)}}),norm:j=>({results:((j.web||{}).results||[]).map(r=>({t:r.title,u:r.url,c:r.description}))})},
  serper:{n:'Serper',need:'key',req:(q,n,s)=>({url:'https://google.serper.dev/search',method:'POST',headers:{'Content-Type':'application/json','X-API-KEY':kk(s)},body:J.stringify({q,num:n})}),norm:j=>({answer:j.answerBox&&(j.answerBox.answer||j.answerBox.snippet),results:(j.organic||[]).map(r=>({t:r.title,u:r.link,c:r.snippet}))})},
  searxng:{n:'SearXNG',need:'sx',req:(q,n,s)=>({url:s.sx.replace(/\/$/,'')+'/search?format=json&q='+encodeURIComponent(q),method:'GET',headers:{}}),norm:j=>({answer:(j.answers||[])[0],results:(j.results||[]).map(r=>({t:r.title,u:r.url,c:r.content}))})},
- custom:{n:'Custom',need:'cu',req:(q,n,s)=>{let h={};try{h=J.parse(s.ch||'{}')}catch{}const f=t=>t.replace(/\{query\}/g,encodeURIComponent(q)).replace(/\{n\}/g,n);return{url:f(s.cu),method:s.cm,headers:h,body:s.cm==='GET'?'':(s.cb||'').replace(/\{query\}/g,J.stringify(q).slice(1,-1)).replace(/\{n\}/g,n)}},norm:generic}};
+ custom:{n:'Custom',need:'cu',req:(q,n,s)=>{let h={};try{h=J.parse(s.ch||'{}')}catch{}const f=t=>t.replace(/\{query\}/g,encodeURIComponent(q)).replace(/\{n\}/g,n);return{url:f(s.cu),method:s.cm,headers:h,body:s.cm==='GET'?'':(s.cb||'').replace(/\{query\}/g,J.stringify(q).slice(1,-1)).replace(/\{n\}/g,n)}},norm:generic},
+ direct:{n:'Direct fetch',need:'none',req:null,norm:null}};
 async function httpx(r){if(window.Native)return J.parse(await nat('http',r));const x=await fetch(r.url,{method:r.method,headers:r.headers,body:r.method==='GET'?undefined:r.body});return{status:x.status,body:await x.text()}}
 async function webSearch(q,n){const s=cfg.search,p=PROV[s.prov];if(!q)throw Error('query is required');
  n=Math.max(1,Math.min(+n||s.max,10));
@@ -1070,6 +1074,8 @@ async function webSearch(q,n){const s=cfg.search,p=PROV[s.prov];if(!q)throw Erro
    return{text,data:{answer:null,results:[],prov:'offline-memory',offline:true,reason,saved:[]}};
  }
  if(!searchReady())return offlineFallback('web search not configured');
+ if(cfg.search.prov==='direct')return offlineFallback('Direct fetch is for fetch_web / specific URLs — pick Tavily, Brave, Serper, SearXNG or Custom for search');
+ const prior=await searchLogFind(q,p.n); if(prior&&prior.paths&&prior.paths.length){const text=['[Dedup] Same query already searched via '+p.n+'. Use read_file on these paths or pass a new query:',...prior.paths.map((x,i)=>(i+1)+'. '+x)].join('\n');return{text,data:{answer:null,results:[],prov:p.n,dedup:true,saved:prior.paths.map(path=>({path}))}};}
  try{
    const x=await httpx(p.req(q,n,s));
    if(x.status>=400)throw Error(`${p.n} returned HTTP ${x.status}: ${x.body.slice(0,140)}`);
@@ -1082,6 +1088,7 @@ async function webSearch(q,n){const s=cfg.search,p=PROV[s.prov];if(!q)throw Erro
      return `${i+1}. ${r.t||r.u}\n${r.u}${path?'\nSaved: '+path:''}\n${body}`;
    }),!rs.length&&o.raw?o.raw:'',!rs.length&&!o.raw?'No results.':''].filter(Boolean).join('\n\n');
    if(saved.some(x=>x&&x.path))text+='\n\nFull pages saved under web-cache/. Use read_file on a Saved path for the complete text.';
+   await searchLogPut({query:q,prov:p.n,ts:Date.now(),paths:(saved||[]).filter(x=>x&&x.path).map(x=>x.path)});
    return{text,data:{answer:o.answer&&String(o.answer).slice(0,600),results:rs.map((r,i)=>({t:r.t,u:r.u,c:String(r.c||'').slice(0,200),path:saved[i]&&saved[i].path||null,chars:saved[i]&&saved[i].chars||0})),prov:p.n,saved:saved.filter(x=>x&&x.path)}};
  }catch(e){
    const msg=String(e.message||e);
@@ -1106,7 +1113,9 @@ async function saveWebPages(rs,query,prov){
     const body=String(r.raw||r.c||'').trim();
     if(body.length<40){out.push(null);continue}
     const path=webCacheName(r.u,r.t);
-    const header=`# ${r.t||r.u||'Untitled'}\n\n- URL: ${r.u||''}\n- Query: ${query||''}\n- Provider: ${prov||''}\n- Saved: ${new Date().toISOString()}\n\n---\n\n`;
+    const hash=String(body.length)+':'+body.slice(0,200).split('').reduce((a,c)=>(a*31+c.charCodeAt(0))>>>0,0).toString(36);
+    if(cfg.search.dedup!==false){try{const prev=J.parse(await nat('read_file',{path,max_chars:400}));const head=(prev.text||'').slice(0,400);const mh=(head.match(/Content-Hash:\s*(\S+)/)/)||[])[1];if(mh===hash){out.push({path,chars:body.length,url:r.u,title:r.t,dedup:true});continue}}catch(_){}}
+    const header=`# ${r.t||r.u||'Untitled'}\n\n- URL: ${r.u||''}\n- Query: ${query||''}\n- Provider: ${prov||''}\n- Saved: ${new Date().toISOString()}\n- Content-Hash: ${hash}\n\n---\n\n`;
     const content=(header+body).slice(0,200000);
     try{
       await nat('write_file',{path,content,overwrite:true});
@@ -1116,6 +1125,81 @@ async function saveWebPages(rs,query,prov){
   return out;
 }
 /** Fetch full page text for specific URLs (Tavily extract) and store under web-cache/. Max 5 URLs. */
+
+/** Client-side host blocklist (native layer also enforces SSRF on redirects). */
+function isBlockedHost(host){
+  host=String(host||'').toLowerCase();
+  if(!host)return true;
+  if(host==='localhost'||host.endsWith('.localhost')||host.endsWith('.local')||host==='0.0.0.0'||host==='::1'||host==='[::1]')return true;
+  if(host==='metadata.google.internal'||host.endsWith('.internal'))return true;
+  if(/^(127\.|10\.|192\.168\.|169\.254\.)/.test(host))return true;
+  if(/^172\.(1[6-9]|2\d|3[0-1])\./.test(host))return true;
+  if(host.startsWith('fc')||host.startsWith('fd')||host.startsWith('fe80'))return true;
+  return false;
+}
+function assertSafeUrl(url){
+  let u; try{u=new URL(url)}catch{throw Error('invalid URL')}
+  if(u.protocol!=='http:'&&u.protocol!=='https:')throw Error('only http(s) URLs allowed');
+  if(isBlockedHost(u.hostname))throw Error('SSRF blocked: host '+u.hostname+' is not allowed');
+  return u;
+}
+function htmlToMd(html, maxChars){
+  let s=String(html||'');
+  s=s.replace(/<script[\s\S]*?<\/script>/gi,' ').replace(/<style[\s\S]*?<\/style>/gi,' ');
+  s=s.replace(/<!--[\s\S]*?-->/g,' ');
+  s=s.replace(/<(h[1-6])[^>]*>([\s\S]*?)<\/\1>/gi,(_,t,b)=>'\n\n'+'#'.repeat(+t[1])+' '+b.replace(/<[^>]+>/g,'').trim()+'\n\n');
+  s=s.replace(/<li[^>]*>([\s\S]*?)<\/li>/gi,(_,b)=>'- '+b.replace(/<[^>]+>/g,'').trim()+'\n');
+  s=s.replace(/<br\s*\/?>/gi,'\n').replace(/<\/p>/gi,'\n\n').replace(/<\/div>/gi,'\n');
+  s=s.replace(/<a[^>]+href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi,(_,h,b)=>`[${b.replace(/<[^>]+>/g,'').trim()}](${h})`);
+  s=s.replace(/<[^>]+>/g,' ');
+  s=s.replace(/&nbsp;/g,' ').replace(/&amp;/g,'&').replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/&quot;/g,'"').replace(/&#39;/g,"'");
+  s=s.replace(/[ \t]+\n/g,'\n').replace(/\n{3,}/g,'\n\n').trim();
+  return s.slice(0, maxChars||12000);
+}
+async function fetchWebPage(url, opts={}){
+  const u=assertSafeUrl(url);
+  const maxChars=Math.max(500, Math.min(+(opts.max_chars||12000), 100000));
+  if(!window.Native)throw Error('Direct fetch needs the Android app (native HTTP with SSRF guards)');
+  const x=await httpx({url:u.href, method:'GET', headers:{'User-Agent':'Kojot-fetch/1.0','Accept':'text/html,application/xhtml+xml,text/plain;q=0.9,*/*;q=0.8'}});
+  if(x.status>=400)throw Error(`HTTP ${x.status} for ${u.href}`);
+  const finalUrl=x.final_url||u.href;
+  try{assertSafeUrl(finalUrl)}catch(e){throw Error('SSRF blocked after redirect: '+e.message)}
+  const body=String(x.body||'');
+  const isHtml=/<html|<body|<!doctype html/i.test(body.slice(0,2000));
+  const text=isHtml?htmlToMd(body,maxChars):body.slice(0,maxChars);
+  const rs=[{t:(text.split('\n').find(l=>l.trim())||finalUrl).replace(/^#+\s*/,'').slice(0,120), u:finalUrl, c:text, raw:text}];
+  let saved=null;
+  if(cfg.search.save_pages!==false){
+    const out=await saveWebPages(rs,'fetch_web','Direct fetch');
+    saved=out[0];
+  }
+  const path=saved&&saved.path;
+  return{text:[`Fetched ${finalUrl} (${text.length} chars)`+(path?'\nSaved: '+path:''), text.slice(0,4000)+(text.length>4000?'\n…':'')].join('\n\n'), data:{url:finalUrl, path:path||null, chars:text.length, prov:'Direct fetch', saved:path?[saved]:[]}};
+}
+async function mapSite(url, limit=40){
+  const s=cfg.search;
+  if(s.prov!=='tavily'||!s.keys.tavily)throw Error('map_site needs Tavily (Settings → Web search → Tavily)');
+  limit=Math.max(1,Math.min(+limit||40,100));
+  const x=await httpx({url:'https://api.tavily.com/map',method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+s.keys.tavily},body:J.stringify({url, limit})});
+  if(x.status>=400)throw Error(`Tavily map HTTP ${x.status}: ${x.body.slice(0,140)}`);
+  let j=null;try{j=J.parse(x.body)}catch{}
+  const urls=(j&&(j.results||j.urls))||[];
+  const list=Array.isArray(urls)?urls.map(u=>typeof u==='string'?u:(u.url||'')).filter(Boolean):[];
+  const text=list.length?list.slice(0,80).map((u,i)=>(i+1)+'. '+u).join('\n'):'No URLs returned.';
+  return{text:`Mapped ${list.length} URL(s) under ${url}\n\n${text}`, data:{urls:list.slice(0,100), total:list.length, prov:'Tavily map'}};
+}
+async function searchLogGet(){
+  try{const r=J.parse(await nat('read_file',{path:'web-cache/_searches.json',max_chars:200000}));const raw=r.text||(r.data&&r.data.text)||'';return J.parse(raw)}catch{return{entries:[]}}
+}
+async function searchLogPut(entry){
+  if(!window.Native||cfg.search.dedup===false)return;
+  try{await nat('make_dir',{path:'web-cache'});const log=await searchLogGet();log.entries=(log.entries||[]).filter(e=>!(e.query===entry.query&&e.prov===entry.prov));log.entries.unshift(entry);if(log.entries.length>80)log.entries.length=80;await nat('write_file',{path:'web-cache/_searches.json',content:J.stringify(log,null,2),overwrite:true})}catch(_){}
+}
+async function searchLogFind(query,prov){
+  if(cfg.search.dedup===false)return null;
+  try{const log=await searchLogGet();return(log.entries||[]).find(e=>e.query===query&&e.prov===prov)||null}catch{return null}
+}
+
 async function fetchPages(urls){
   const list=[].concat(urls||[]).map(u=>String(u||'').trim()).filter(Boolean).slice(0,5);
   if(!list.length)throw Error('urls is required (1-5)');
@@ -1136,6 +1220,7 @@ async function fetchPages(urls){
 const arr=x=>[].concat(x==null?[]:x).filter(v=>v!==''),base=p=>String(p||'').replace(/\/+$/,'').split('/').pop()||'/';
 const items=x=>{const a=arr(x);return a.length===1?`"${base(a[0])}"`:`${a.length} items`};
 const TT={
+ identify_model:{i:'bulb',v:['Identifying','Identified','Identify'],o:a=>a.path||a.name||'bound model',s:(a,k)=>k.data?(k.data.preset&&k.data.preset.label||k.data.family||'')+(k.data.card?' · '+k.data.card.id:''):''},
  get_vitals:{i:'bulb',v:['Checking','Checked','Check'],o:()=>'device vitals',s:(a,k)=>k.data?`${k.data.battery_pct}% · ${k.data.temp_c}°C · ${k.data.avail_ram_mb}MB free RAM`:''},
 
  forge_tool:{i:'bulb',v:['Forging','Forged','Forge'],o:a=>`tool "${a.name||'custom'}"`,s:a=>`${a.name||''} · ${a.description||''}`},
@@ -1150,6 +1235,8 @@ const TT={
  copy:{i:'copy',v:['Copying','Copied','Copy'],o:a=>items(a.src),s:a=>`${arr(a.src).map(base).join(', ')} → ${a.dst||''}`},
  delete:{i:'trash',v:['Deleting','Deleted','Delete'],o:a=>items(a.paths||a.path),s:a=>arr(a.paths||a.path).join(', ')},
  web_search:{i:'globe',v:['Searching','Searched','Search'],o:a=>'the web for "'+(a.query||'…')+'"',s:(a,k)=>k.data?(k.data.results.length+' results · '+k.data.prov+(k.data.saved&&k.data.saved.length?' · '+k.data.saved.length+' saved':'')):(PROV[cfg.search.prov]||{}).n||''},
+ fetch_web:{i:'globe',v:['Fetching','Fetched','Fetch'],o:a=>a.url||'page',s:(a,k)=>k.data?(k.data.chars||0)+' chars'+(k.data.path?' · saved':''):''},
+ map_site:{i:'globe',v:['Mapping','Mapped','Map'],o:a=>a.url||'site',s:(a,k)=>k.data?(k.data.total||0)+' urls':''},
  fetch_page:{i:'globe',v:['Fetching','Fetched','Fetch'],o:a=>((a.urls&&a.urls.length)||0)+' page(s)',s:(a,k)=>k.data&&k.data.saved?k.data.saved.length+' saved under web-cache/':''},
  write_file:{i:'file',v:['Writing','Wrote','Write'],o:a=>base(a.path||'file'),s:a=>(a.path||'')+' ('+fmt((a.content||'').length)+')'},
  edit_file:{i:'file',v:['Editing','Edited','Edit'],o:a=>base(a.path||'file'),s:a=>a.path||''},
@@ -1291,6 +1378,233 @@ function setBusy(b){busy=b;const g=$('#go');g.innerHTML=b?I.stop:I.up;g.disabled
 function fresh(){const c={id:'c'+Date.now(),title:'',messages:[]};chats.unshift(c);cid=c.id;return c}
 
 /* ---------- model loop ---------- */
+
+
+/* ========== Model identity, HF lookup, power presets ========== */
+const MODEL_PRESETS={
+  gemma:{label:'Gemma',t:0.7,m:1024,p:{top_k:64,top_p:0.95,min_p:0.05,repeat_penalty:1.1,repeat_last_n:64,temperature:0.7},note:'Google Gemma family — balanced chat defaults'},
+  qwen:{label:'Qwen',t:0.7,m:1024,p:{top_k:20,top_p:0.8,min_p:0.05,repeat_penalty:1.05,repeat_last_n:64,temperature:0.7},note:'Qwen2/2.5/3 — lower top_k works well'},
+  'qwen-coder':{label:'Qwen Coder',t:0.2,m:2048,p:{top_k:20,top_p:0.8,min_p:0.05,repeat_penalty:1.05,repeat_last_n:128,temperature:0.2},note:'Code-focused Qwen — cooler temperature'},
+  llama:{label:'Llama',t:0.7,m:1024,p:{top_k:40,top_p:0.9,min_p:0.05,repeat_penalty:1.1,repeat_last_n:64,temperature:0.7},note:'Meta Llama 3/3.1/3.2 defaults'},
+  mistral:{label:'Mistral',t:0.7,m:1024,p:{top_k:40,top_p:0.95,min_p:0.05,repeat_penalty:1.1,repeat_last_n:64,temperature:0.7},note:'Mistral / Mixtral style'},
+  phi:{label:'Phi',t:0.7,m:1024,p:{top_k:50,top_p:0.95,min_p:0.05,repeat_penalty:1.1,repeat_last_n:64,temperature:0.7},note:'Microsoft Phi family'},
+  deepseek:{label:'DeepSeek',t:0.6,m:2048,p:{top_k:40,top_p:0.95,min_p:0.05,repeat_penalty:1.1,repeat_last_n:64,temperature:0.6},note:'DeepSeek — slightly cooler for reasoning'},
+  command:{label:'Command-R',t:0.3,m:1024,p:{top_k:0,top_p:0.75,min_p:0.0,repeat_penalty:1.1,repeat_last_n:64,temperature:0.3},note:'Cohere Command style'},
+  default:{label:'Generic GGUF',t:0.7,m:1024,p:{top_k:40,top_p:0.95,min_p:0.05,repeat_penalty:1.1,repeat_last_n:64,temperature:0.7},note:'Safe generic sampling'}
+};
+function parseGgufFileName(name){
+  const n=String(name||'').replace(/\.gguf$/i,'');
+  const quant=(n.match(/\b(Q[2-8]_[A-Z0-9_]+|IQ[1-4]_[A-Z0-9_]+|F16|F32|BF16)\b/i)||[])[1]||'';
+  const params=(n.match(/\b(\d+(?:\.\d+)?)\s*[Bb]\b/)||n.match(/[-_](\d+(?:\.\d+)?)[Bb](?:[-_]|$)/)||[])[1]||'';
+  let family='default', archHint='';
+  const low=n.toLowerCase();
+  if(/qwen.*coder|coder.*qwen|codeqwen/i.test(low))family='qwen-coder';
+  else if(/qwen/i.test(low))family='qwen';
+  else if(/gemma/i.test(low))family='gemma';
+  else if(/llama|l3\.|l3_/i.test(low))family='llama';
+  else if(/mistral|mixtral|zephyr/i.test(low))family='mistral';
+  else if(/\bphi/i.test(low))family='phi';
+  else if(/deepseek/i.test(low))family='deepseek';
+  else if(/command[-_]?r/i.test(low))family='command';
+  archHint=family==='default'?'':family.replace('-coder','');
+  return{stem:n,quant,params_b:params,family,archHint};
+}
+async function readLocalGgufInfo(path){
+  if(!window.Native||!path)return null;
+  try{const r=J.parse(await nat('gguf_info',{path}));return r}catch(e){return{error:String(e.message||e)}}
+}
+async function hfSearchModels(query, limit=5){
+  const q=String(query||'').trim();
+  if(!q)throw Error('query required');
+  // Public HF Hub API (not private network)
+  const url='https://huggingface.co/api/models?search='+encodeURIComponent(q)+'&limit='+Math.min(+limit||5,10)+'&full=false&config=false';
+  const x=await httpx({url,method:'GET',headers:{Accept:'application/json','User-Agent':'Kojot-model-lookup/1.0'}});
+  if(x.status>=400)throw Error('Hugging Face HTTP '+x.status+': '+String(x.body||'').slice(0,120));
+  let arr=[];try{arr=J.parse(x.body)}catch{throw Error('HF returned non-JSON')}
+  if(!Array.isArray(arr))arr=[];
+  return arr.map(m=>({
+    id:m.id||m.modelId||'',
+    pipeline:m.pipeline_tag||'',
+    downloads:m.downloads||0,
+    likes:m.likes||0,
+    tags:(m.tags||[]).slice(0,12),
+    library:m.library_name||''
+  })).filter(m=>m.id);
+}
+async function hfModelCard(repoId){
+  const id=String(repoId||'').trim();
+  if(!id||id.includes('://'))throw Error('repo id like org/name');
+  const url='https://huggingface.co/api/models/'+id.split('/').map(encodeURIComponent).join('/');
+  const x=await httpx({url,method:'GET',headers:{Accept:'application/json','User-Agent':'Kojot-model-lookup/1.0'}});
+  if(x.status>=400)throw Error('HF model HTTP '+x.status);
+  let j={};try{j=J.parse(x.body)}catch{throw Error('HF non-JSON')}
+  return{
+    id:j.id||id,
+    author:j.author||id.split('/')[0],
+    pipeline:j.pipeline_tag||'',
+    tags:(j.tags||[]).slice(0,20),
+    downloads:j.downloads||0,
+    likes:j.likes||0,
+    library:j.library_name||'',
+    card: (j.cardData&& (j.cardData.model_name||j.cardData.base_model))||'',
+    siblings:(j.siblings||[]).filter(s=>/\.gguf$/i.test(s.rfilename||'')).map(s=>s.rfilename).slice(0,15)
+  };
+}
+function pickPreset(family, tags){
+  const tagStr=(tags||[]).join(' ').toLowerCase();
+  if(/code|coder/.test(tagStr)&&MODEL_PRESETS['qwen-coder'])return MODEL_PRESETS[family==='qwen'?'qwen-coder':family]||MODEL_PRESETS['qwen-coder'];
+  return MODEL_PRESETS[family]||MODEL_PRESETS.default;
+}
+function applyPresetToCfg(preset, {savePath}={}){
+  if(!preset)return;
+  if(preset.t!=null)cfg.t=preset.t;
+  if(preset.m!=null)cfg.m=preset.m;
+  cfg.p=Object.assign({}, cfg.p||{}, preset.p||{});
+  // mirror temperature into p if present
+  if(preset.p&&preset.p.temperature!=null)cfg.t=preset.p.temperature;
+  if(savePath){
+    cfg.model_profiles=cfg.model_profiles||{};
+    cfg.model_profiles[savePath]=snapshotPowerProfile();
+    cfg.model_profiles[savePath].identity={family:preset.label,note:preset.note};
+    cfg.model_profile_key=savePath;
+  }
+  saveCfg();
+}
+/** Identify bound (or named) model: GGUF meta + filename + HF Hub. */
+async function identifyModel(opts={}){
+  const path=opts.path||(NI&&NI.model_path)||cfg.model_profile_key||'';
+  const fileName=opts.name||(path?path.split('/').pop():'')||'';
+  const parsed=parseGgufFileName(fileName);
+  let gguf=null;
+  if(path)gguf=await readLocalGgufInfo(path);
+  const arch=(gguf&&gguf.architecture)||parsed.archHint||'';
+  let family=parsed.family;
+  if(arch){
+    const a=String(arch).toLowerCase();
+    if(/qwen/.test(a))family=/coder/.test(fileName.toLowerCase())?'qwen-coder':'qwen';
+    else if(/gemma/.test(a))family='gemma';
+    else if(/llama/.test(a))family='llama';
+    else if(/mistral/.test(a))family='mistral';
+    else if(/phi/.test(a))family='phi';
+    else if(/deepseek/.test(a))family='deepseek';
+  }
+  const searchQ=[gguf&&gguf.name, parsed.stem.replace(/[-_]?q[2-8].*$/i,'').replace(/[-_]/g,' ').trim(), arch].filter(Boolean).join(' ');
+  let hf=[], card=null, hfError='';
+  try{
+    hf=await hfSearchModels(searchQ||parsed.stem, 5);
+    if(hf[0])card=await hfModelCard(hf[0].id);
+  }catch(e){hfError=String(e.message||e)}
+  const preset=pickPreset(family, (card&&card.tags)||(hf[0]&&hf[0].tags)||[]);
+  return{
+    path, fileName, parsed, gguf:gguf&&!gguf.error?gguf:null, ggufError:gguf&&gguf.error,
+    architecture:arch|| (gguf&&gguf.architecture)||'',
+    family, preset, hf, card, hfError, searchQ
+  };
+}
+async function toolIdentifyModel(a={}){
+  const info=await identifyModel({path:a.path, name:a.name});
+  const apply=!!a.apply_preset;
+  const save=!!a.save_profile;
+  if(apply)applyPresetToCfg(info.preset,{savePath:save?info.path:null});
+  else if(save&&info.path){cfg.model_profiles=cfg.model_profiles||{};cfg.model_profiles[info.path]=Object.assign(snapshotPowerProfile(),{identity:{family:info.preset.label,hf:info.card&&info.card.id,note:info.preset.note}});cfg.model_profile_key=info.path;saveCfg()}
+  const lines=[
+    `Model file: ${info.fileName||'(unknown)'}`,
+    info.path?`Path: ${info.path}`:'',
+    info.architecture?`GGUF architecture: ${info.architecture}`:'',
+    info.gguf&&info.gguf.name?`GGUF name: ${info.gguf.name}`:'',
+    info.parsed.quant?`Quant: ${info.parsed.quant}`:'',
+    info.parsed.params_b?`Size label: ~${info.parsed.params_b}B`:'',
+    `Family guess: ${info.preset.label}`,
+    `Suggested sampling: temp=${info.preset.t} top_k=${info.preset.p.top_k} top_p=${info.preset.p.top_p} repeat_penalty=${info.preset.p.repeat_penalty}`,
+    info.preset.note,
+    info.card?`Hugging Face: ${info.card.id} (${info.card.downloads} downloads)`:'',
+    info.hf.length&&!info.card?`HF candidates: ${info.hf.map(h=>h.id).join(', ')}`:'',
+    info.hfError?`HF lookup: ${info.hfError}`:'',
+    apply?`Applied preset to Power settings${save?' and saved profile':''}.`:(save?'Saved current settings as profile.':'Pass apply_preset=true to load suggestions; save_profile=true to store them.')
+  ].filter(Boolean);
+  return{text:lines.join('\n'), data:{...info, applied:apply, saved:save}};
+}
+
+function modelProfileKey(path){return String(path||'').trim()}
+function snapshotPowerProfile(){
+  return {t:cfg.t,m:cfg.m,p:structuredClone(cfg.p||{}),srv:structuredClone(cfg.srv||{}),xj:cfg.xj||'',ts:Date.now()};
+}
+function applyPowerProfile(prof){
+  if(!prof)return;
+  if(prof.t!=null)cfg.t=prof.t;
+  if(prof.m!=null)cfg.m=prof.m;
+  if(prof.p)cfg.p=structuredClone(prof.p);
+  if(prof.srv)cfg.srv=structuredClone(prof.srv);
+  if(prof.xj!=null)cfg.xj=prof.xj;
+}
+
+let _lastIdentify=null;
+function renderProfileList(){
+  const box=$('#mp-list'); if(!box)return;
+  cfg.model_profiles=cfg.model_profiles||{};
+  const keys=Object.keys(cfg.model_profiles);
+  if(!keys.length){box.innerHTML='<div class="note">No saved profiles yet. Identify a model or press Save profile.</div>';return}
+  box.innerHTML=keys.map(path=>{
+    const pr=cfg.model_profiles[path]||{};
+    const name=path.split('/').pop();
+    const id=pr.identity||{};
+    const live=cfg.model_profile_key===path?' · active':'';
+    return `<div class="card" style="padding:10px;border:1px solid var(--line);border-radius:10px;background:var(--bg-well)">
+      <div style="font-weight:600;word-break:break-all">${esc(name)}${live}</div>
+      <div style="color:var(--fg-3);font-size:12px;margin:4px 0">${esc(id.family||'')} ${id.hf?' · '+esc(id.hf):''} · temp ${pr.t??'—'} · max ${pr.m??'—'} · top_p ${(pr.p&&pr.p.top_p)??'—'}</div>
+      <div style="color:var(--fg-3);font-size:12px">${esc(id.note||pr.note||'')}</div>
+      <div class="r2" style="margin-top:6px;flex-wrap:wrap;gap:6px">
+        <button class="btn sm" data-mp-edit="${ea(path)}">Edit</button>
+        <button class="btn sm" data-mp-load="${ea(path)}">Load</button>
+        <button class="btn sm dng" data-mp-del="${ea(path)}">Delete</button>
+      </div>
+    </div>`;
+  }).join('');
+}
+function openProfileEditor(path){
+  cfg.model_profiles=cfg.model_profiles||{};
+  const pr=cfg.model_profiles[path]; if(!pr)return;
+  $('#mp-e-path').value=path;
+  $('#mp-e-note').value=(pr.identity&&pr.identity.note)||pr.note||'';
+  $('#mp-e-t').value=pr.t??cfg.t??0.7;
+  $('#mp-e-m').value=pr.m??cfg.m??1024;
+  $('#mp-e-topk').value=(pr.p&&pr.p.top_k)!=null?pr.p.top_k:'';
+  $('#mp-e-topp').value=(pr.p&&pr.p.top_p)!=null?pr.p.top_p:'';
+  $('#mp-e-minp').value=(pr.p&&pr.p.min_p)!=null?pr.p.min_p:'';
+  $('#mp-e-rep').value=(pr.p&&pr.p.repeat_penalty)!=null?pr.p.repeat_penalty:'';
+  const rest={...(pr.p||{})}; delete rest.top_k; delete rest.top_p; delete rest.min_p; delete rest.repeat_penalty; delete rest.temperature;
+  $('#mp-e-extra').value=Object.keys(rest).length?J.stringify(rest,null,2):'';
+  const d=$('#mp-edit-dlg'); if(d&&d.showModal)d.showModal();
+}
+function readProfileEditor(){
+  const path=$('#mp-e-path').value;
+  const p={...(cfg.model_profiles[path]&&cfg.model_profiles[path].p||{})};
+  const topk=$('#mp-e-topk').value, topp=$('#mp-e-topp').value, minp=$('#mp-e-minp').value, rep=$('#mp-e-rep').value;
+  if(topk!=='')p.top_k=+topk; else delete p.top_k;
+  if(topp!=='')p.top_p=+topp; else delete p.top_p;
+  if(minp!=='')p.min_p=+minp; else delete p.min_p;
+  if(rep!=='')p.repeat_penalty=+rep; else delete p.repeat_penalty;
+  try{const extra=J.parse($('#mp-e-extra').value||'{}');Object.assign(p,extra)}catch(e){throw Error('Extra JSON: '+e.message)}
+  const t=+$('#mp-e-t').value, m=+$('#mp-e-m').value;
+  if(t===t)p.temperature=t;
+  return{path,t:t===t?t:cfg.t,m:m===m?m:cfg.m,p,note:($('#mp-e-note').value||'').trim()};
+}
+
+function saveModelProfileFor(path){
+  path=modelProfileKey(path); if(!path)return false;
+  cfg.model_profiles=cfg.model_profiles||{};
+  cfg.model_profiles[path]=snapshotPowerProfile();
+  cfg.model_profile_key=path;
+  saveCfg(); return true;
+}
+function loadModelProfileFor(path){
+  path=modelProfileKey(path);
+  cfg.model_profiles=cfg.model_profiles||{};
+  const prof=cfg.model_profiles[path];
+  if(prof){applyPowerProfile(prof);cfg.model_profile_key=path;saveCfg();return true}
+  cfg.model_profile_key=path; saveCfg(); return false;
+}
+
 function reqParams(){
   const isC = (NI && NI.active_slot === 'coder');
   const p = (isC ? cfg.p_coder : cfg.p) || {}, o = {};
@@ -1317,8 +1631,11 @@ function condenseTool(k) {
   if (k.name === "move" || k.name === "copy") return "[" + k.name + " OK]";
   if (k.name === "delete") return "[Deleted: OK]";
   if (k.name === "save_fact") return "[Saved fact: OK]";
+  if (k.name === "identify_model") return "[Identified: " + (k.data?.preset?.label || k.data?.family || "model") + (k.data?.card?.id ? " · " + k.data.card.id : "") + "]";
   if (k.name === "web_search") return "[Web search: " + (k.data?.results?.length || 0) + " results used" + (k.data?.saved?.length ? ", " + k.data.saved.length + " saved" : "") + "]";
   if (k.name === "fetch_page") return "[Fetched pages: " + (k.data?.saved?.length || 0) + " saved]";
+  if (k.name === "fetch_web") return "[Fetched page: " + (k.data?.chars || 0) + " chars" + (k.data?.path ? ", saved" : "") + "]";
+  if (k.name === "map_site") return "[Mapped site: " + (k.data?.total || 0) + " urls]";
   if (k.name === "get_vitals") return "[Vitals: " + (k.data?.battery_pct || "?") + "% battery]";
   if (k.name.startsWith("gh_")) return "[GitHub " + k.name + ": OK]";
   return String(k.res || "(done)").slice(0, 120);
@@ -1691,8 +2008,11 @@ async function runTool(k){
   const cached=Cap.getCached(k.name,k.args);
   if(cached)return{...cached,_cached:true};
   let out;
-  if(k.name==='web_search')out=await webSearch(k.args.query,k.args.max_results);
+  if(k.name==='identify_model')out=await toolIdentifyModel(k.args);
+  else if(k.name==='web_search')out=await webSearch(k.args.query,k.args.max_results);
   else if(k.name==='fetch_page')out=await fetchPages(k.args.urls);
+  else if(k.name==='fetch_web')out=await fetchWebPage(k.args.url,{max_chars:k.args.max_chars});
+  else if(k.name==='map_site')out=await mapSite(k.args.url,k.args.limit);
   else if(k.name.startsWith('gh_'))out=await ghTool(k.name,k.args);
   else if(k.name==='forge_tool')out=await forgeCustomTool(k.args);
   else if(k.name==='list_forged_tools')out=await listCustomTools();
@@ -2037,91 +2357,7 @@ function paneTools(){return`<div class="pane" data-p="tool"><div class="sec">Pho
  </div>
  <div class="tst" id="vit-m" style="white-space:pre-wrap;font-family:var(--mono);font-size:12px;margin-top:6px"></div>
 
- <div class="sec">Models folder (no copy)</div>
- <div class="note" style="margin:0 0 8px">One GGUF on disk — <b>no second copy</b>. Default: <code>Download/Local Models</code> with subfolders <code>llm</code>, <code>embed</code>, <code>coder</code>, <code>image</code>, <code>ocr</code>, <code>decision</code>. OCR is optional: bind a GGUF to the <b>OCR</b> slot if you have a vision/OCR model; otherwise AI Fill falls back to on-device <b>ML Kit</b>.</div>
- <div class="fi"><label>Models folder path</label>
-  <div class="r2"><input class="in" id="models-dir-in" autocapitalize="off" spellcheck="false" placeholder="/sdcard/Download/Local Models"><button class="btn sm" id="models-dir-set" style="margin:0">Set</button></div>
- </div>
- <div class="tst" id="models-dir-m"></div>
- <div id="models-list" style="max-height:160px;overflow-y:auto;font-size:13px;margin:8px 0;padding:6px;background:var(--bg-well);border-radius:10px"></div>
- <div class="r2" style="flex-wrap:wrap;gap:6px">
-  <button class="btn sm" id="models-refresh">Refresh list</button>
-  <button class="btn sm" id="main-pick">Pick file…</button>
- </div>
-
- <div class="sec">Main Chat Model</div>
-<div class="set"><div class="lt"><span id="main-st">Chat Model</span><small id="main-s">no copy · external path preferred</small></div></div>
-<div class="note" style="margin:4px 0 8px">Unbind removes the app’s pointer only — your file in the models folder is never deleted. If App Info still shows ~10GB, tap Unbind, delete any leftover <code>model.gguf</code> under app storage by unbinding all slots, then bind again from the list above.</div>
-<div class="r2" style="margin-top:4px;gap:8px">
-  <button class="btn sm dng" id="main-del" style="display:none">Unbind model</button>
-</div>
-<div class="tst" id="main-m"></div>
-
- <div class="sec">Active Project</div>
- <div class="fi"><label>Project name</label><input class="in" id="proj-name" placeholder="e.g. Kojot Android" value=""></div>
- <div class="fi" style="margin-top:6px"><label>Conventions <span style="color:var(--fg-3);font-weight:400">(injected every turn)</span></label>
-  <textarea class="in" id="proj-conv" rows="3" placeholder="Kotlin style, package layout, test commands…"></textarea></div>
- <div class="r2" style="margin-top:6px"><button class="btn sm" id="proj-save">Save project</button></div>
- <div class="tst" id="proj-m"></div>
-
- <div class="sec">Agent depth</div>
- <div class="set"><div class="lt"><span>Performance profile</span><small id="prof-s">balanced · respects thermals & battery</small></div></div>
- <div class="set"><div class="seg" id="prof-seg">
-  <button data-prof="efficiency">Efficiency</button>
-  <button data-prof="balanced">Balanced</button>
-  <button data-prof="max">Max</button>
- </div></div>
- ${sw('auto_coder','Auto-route models','Code intent → coder; other chat → main; OCR pauses chat then restores. Spinner while switching.')}
- ${sw('tool_cache','Tool result cache','Reuse recent read-only tool results for 5 minutes')}
- <div class="r2" style="margin-top:8px">
-  <button class="btn sm" id="allow-clear">Clear approval memory</button>
- </div>
- <div class="tst" id="agent-depth-m"></div>
-
- <div class="sec">Coder Engine (Monaco)</div>
-<div class="set"><div class="lt"><span id="coder-st">Specialized Coding Model</span><small id="coder-s">tap to select .gguf</small></div><button class="btn sm" id="coder-pick">Choose .gguf</button></div>
-<div class="fi" style="margin-top:8px">
- <label>Coder Context Window (-c)</label>
- <select class="in" id="coder-ctx">
-  <option value="8192">8192</option>
-  <option value="16384">16384</option>
-  <option value="32768" selected>32768 (Recommended for Qwen 3.5)</option>
-  <option value="65536">65536</option>
- </select>
- <small style="color:var(--fg-3)">Hybrid linear attention uses only ~400MB RAM at 32k context.</small>
-</div>
- <div class="sl" style="padding:6px 0">
-  <div class="sl-h"><span>Coder Temperature</span><b id="coder-t-lbl">0.10</b></div>
-  <input type="range" id="coder-t" min="0" max="1" step="0.05" value="0.10">
- </div>
- <div class="r2" style="margin-top:6px;gap:8px">
-  <button class="btn sm" id="coder-save">Save Config</button>
-  <button class="btn sm dng" id="coder-del" style="display:none">Remove Model</button>
- </div>
-<div class="tst" id="coder-m"></div>
-
- <div class="sec" id="ext-models-sec">Models by file type <span style="font-weight:400;color:var(--fg-3)">(power user)</span></div>
- <div class="note" style="margin:0 0 8px" id="ext-models-note">When Power user is on and models stay on-disk (no copy), map extensions to specialized GGUFs for the code editor AI path. Example: <code>.py</code> → a Python fine-tune. Leave blank to use the Coder model. OCR slot is separate (optional; falls back to ML Kit).</div>
- <div id="ext-models-list" style="display:flex;flex-direction:column;gap:6px;margin-bottom:8px"></div>
- <div class="r2" style="gap:6px;flex-wrap:wrap">
-  <input class="in" id="ext-m-ext" placeholder=".py" style="max-width:90px" autocapitalize="off" spellcheck="false">
-  <input class="in" id="ext-m-path" placeholder="path to .gguf (from models folder)" style="flex:1" autocapitalize="off" spellcheck="false">
-  <button class="btn sm" id="ext-m-add">Add</button>
- </div>
- <div class="tst" id="ext-m-msg"></div>
-
- <div class="sec">OCR engine</div>
- <div class="note" style="margin:0 0 8px">Default is on-device <b>ML Kit</b>. Put a vision GGUF in <code>Local Models/ocr/</code> and press the <b>OCR</b> button on its card (folder alone does not bind). Place a matching <code>*mmproj*.gguf</code> beside it for the vision runner on :8082. Runner starts <b>only on first OCR</b> (not at launch). Opening the code editor stops it. Without mmproj → ML Kit only.</div>
- <div class="set"><div class="lt"><span id="ocr-st">OCR path (optional)</span><small id="ocr-s">not set · using ML Kit</small></div></div>
- <div class="r2" style="margin:4px 0 0"><button class="btn sm dng" id="ocr-del" style="display:none">Unbind OCR</button></div>
- <div class="tst" id="ocr-m"></div>
-
- <div class="sec">GitHub Integration</div>
- <div class="fi"><label>Personal Access Token (classic with repo scope)${Q('gh_token','GitHub token','')}</label><input class="in" type="password" data-k="github.token" data-t="str" placeholder="ghp_..."></div>
- <div class="fi"><label>Default Repository (owner/repo)${Q('gh_repo','Default repository','')}</label><input class="in" data-k="github.repo" data-t="str" placeholder="420garbage420/kojot"></div>
- <div class="r2" style="margin-top:6px"><button class="btn sm" id="gh-test">Test Connection</button></div>
- <div class="tst" id="gh-m"></div>
-
+ <div class="note" style="margin:8px 0">Model binding lives in the <b>Models</b> tab.</div>
  <div class="sec">Web search</div>${sw('search.on','Enable web search','Lets the model look things up')}
  <div class="set"><div class="seg" data-seg="search.prov">${Object.entries(PROV).map(([k,v])=>`<button data-v="${k}">${v.n}</button>`).join('')}</div></div>
  ${['tavily','brave','serper'].map(p=>`<div class="fi" data-prov="${p}"><label>${PROV[p].n} API key${Q('search_key','Search API key','')}</label><input class="in" type="password" data-k="search.keys.${p}" data-t="str" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="${p==='tavily'?'tvly-…':'key'}"></div>`).join('')}
@@ -2132,6 +2368,9 @@ function paneTools(){return`<div class="pane" data-p="tool"><div class="sec">Pho
  <div class="fi"><label>Body (POST) — use {query} and {n}${Q('search_cb','Custom POST body','')}</label><textarea class="in" rows="2" data-k="search.cb" data-t="str" spellcheck="false" placeholder='{"q":"{query}","num":{n}}'></textarea><small>Any JSON response works. The first list of results with a url and title is used.</small></div></div>
  <div class="set" data-prov="tavily"><div class="lt">Search depth</div><div class="seg" data-seg="search.depth"><button data-v="basic">Basic</button><button data-v="advanced">Advanced</button></div></div>
  ${num('max','Results per search','1 to 10','5',1,10,1,'int','search')}
+ <div data-prov="direct" class="note" style="margin:8px 0">Direct fetch: no search API. The agent uses <b>fetch_web</b> on public http(s) URLs (SSRF-blocked for private/localhost/metadata). Pair with Tavily if you also need search + map_site.</div>
+ ${sw('search.save_pages','Save pages to web-cache/','Store full text under web-cache/ for later read_file')}
+ ${sw('search.dedup','Dedup searches & pages','Skip identical search queries and skip rewriting unchanged pages')}
  <button class="btn sm" id="ws-test">Test search</button><div class="tst" id="ws-m"></div></div>`}
 let curTab='gen', powTarget='chat';
 function fillPower(){
@@ -2147,7 +2386,55 @@ function fillPower(){
     e.value = v == null ? '' : String(v);
   });
 }
-function tabsHTML(){return[['gen','General'],['tool','Tools'],['mem','Memory'],...(cfg.power?[['pow','Power']]:[])].map(([k,n])=>`<button data-tab="${k}" class="${k===curTab?'on':''}">${n}</button>`).join('')}
+function paneModels(){return`<div class="pane" data-p="models">
+ <div class="sec">Models folder (no copy)</div>
+ <div class="note" style="margin:0 0 8px">One GGUF on disk — <b>no second copy</b>. Default: <code>Download/Local Models</code> with subfolders <code>llm</code>, <code>embed</code>, <code>coder</code>, <code>image</code>, <code>ocr</code>, <code>decision</code>. OCR is optional: bind a GGUF to the <b>OCR</b> slot if you have a vision/OCR model; otherwise AI Fill falls back on-device <b>ML Kit</b>.</div>
+ <div class="fi"><label>Models folder path</label>
+  <div class="r2"><input class="in" id="models-dir-in" autocapitalize="off" spellcheck="false" placeholder="/sdcard/Download/Local Models"><button class="btn sm" id="models-dir-set" style="margin:0">Set</button></div>
+ </div>
+ <div class="tst" id="models-dir-m"></div>
+ <div id="models-list" style="max-height:min(52vh,420px);overflow-y:auto;font-size:13px;margin:8px 0;padding:6px;background:var(--bg-well);border-radius:10px"></div>
+ <div class="r2" style="flex-wrap:wrap;gap:6px">
+  <button class="btn sm" id="models-refresh">Refresh list</button>
+  <button class="btn sm" id="main-pick">Pick via SAF…</button>
+  <button class="btn sm dng" id="main-del">Unbind chat model</button>
+ </div>
+ <div class="sec" style="margin-top:16px">Identify &amp; tune</div>
+ <div class="note" style="margin:0 0 8px">Reads GGUF metadata, matches the file on <b>Hugging Face</b>, and suggests Power-user sampling for that family (Gemma, Qwen, Llama, …).</div>
+ <div class="r2" style="flex-wrap:wrap;gap:6px">
+  <button class="btn sm" id="mp-identify">Identify bound model</button>
+  <button class="btn sm" id="mp-apply">Apply suggested preset</button>
+  <button class="btn sm" id="mp-apply-save">Apply &amp; save profile</button>
+ </div>
+ <div class="tst" id="mp-id" style="white-space:pre-wrap;font-family:var(--mono);font-size:12px;margin-top:6px"></div>
+ <div class="sec" style="margin-top:16px">Per-model power profile</div>
+ <div class="note" style="margin:0 0 8px">Save temperature, max tokens, and Power-user sampling for the <b>currently bound chat</b> model. When you bind a different GGUF, those settings load automatically. Edit any stored profile below.</div>
+ <div class="r2" style="flex-wrap:wrap;gap:6px">
+  <button class="btn sm" id="mp-save">Save profile for this model</button>
+  <button class="btn sm" id="mp-clear">Clear profile for this model</button>
+  <button class="btn sm" id="mp-refresh">Refresh profile list</button>
+ </div>
+ <div class="tst" id="mp-m"></div>
+ <div id="mp-list" style="margin-top:10px;display:flex;flex-direction:column;gap:8px"></div>
+ <dialog id="mp-edit-dlg" style="background:var(--bg);color:var(--fg);border:1px solid var(--line);border-radius:12px;padding:0;width:min(420px,94vw)">
+  <div style="padding:12px 14px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;align-items:center"><b>Edit power profile</b><button class="btn sm" id="mp-edit-x">Close</button></div>
+  <div style="padding:12px 14px;display:flex;flex-direction:column;gap:8px;max-height:70vh;overflow:auto">
+   <div class="fi"><label>Model path</label><input class="in" id="mp-e-path" readonly></div>
+   <div class="fi"><label>Label / notes</label><input class="in" id="mp-e-note" placeholder="e.g. Qwen2.5 7B chat"></div>
+   <div class="r2"><div class="fi" style="flex:1"><label>Temperature</label><input class="in" id="mp-e-t" type="number" step="0.05" min="0" max="2"></div>
+   <div class="fi" style="flex:1"><label>Max tokens</label><input class="in" id="mp-e-m" type="number" step="64" min="128" max="8192"></div></div>
+   <div class="r2"><div class="fi" style="flex:1"><label>top_k</label><input class="in" id="mp-e-topk" type="number"></div>
+   <div class="fi" style="flex:1"><label>top_p</label><input class="in" id="mp-e-topp" type="number" step="0.01"></div></div>
+   <div class="r2"><div class="fi" style="flex:1"><label>min_p</label><input class="in" id="mp-e-minp" type="number" step="0.01"></div>
+   <div class="fi" style="flex:1"><label>repeat_penalty</label><input class="in" id="mp-e-rep" type="number" step="0.01"></div></div>
+   <div class="fi"><label>Extra JSON (merged into Power p)</label><textarea class="in" id="mp-e-extra" rows="3" spellcheck="false" placeholder='{"mirostat":0}'></textarea></div>
+   <div class="r2"><button class="btn sm" id="mp-e-apply">Apply to live settings</button><button class="btn sm primary" id="mp-e-save">Save changes</button><button class="btn sm dng" id="mp-e-del">Delete</button></div>
+  </div>
+ </dialog>
+ <div class="sec" style="margin-top:16px">Main model status</div>
+ <div class="set"><div class="lt"><span>Chat model</span><small id="main-s">—</small></div></div>
+</div>`}
+function tabsHTML(){return[['gen','General'],['models','Models'],['tool','Tools'],['mem','Memory'],...(cfg.power?[['pow','Power']]:[])].map(([k,n])=>`<button data-tab="${k}" class="${k===curTab?'on':''}">${n}</button>`).join('')}
 function paneMemory(){
   return `<div class="pane" data-p="mem">
  <div class="sec">User Memories</div>
@@ -2167,12 +2454,12 @@ function paneMemory(){
  <button class="btn sm" id="gate-save">Save gates</button>
  <div class="tst" id="gate-m"></div>
 </div>`}
-function buildSettings(){$('#s-body').innerHTML=paneGen()+paneTools()+paneMemory()+powerHTML();fill();showTab(curTab);$('#s-tabs').innerHTML=tabsHTML();loadMemoriesUI();loadGatesUI();
+function buildSettings(){$('#s-body').innerHTML=paneGen()+paneModels()+paneTools()+paneMemory()+powerHTML();fill();showTab(curTab);$('#s-tabs').innerHTML=tabsHTML();loadMemoriesUI();loadGatesUI();
   if($('#proj-name'))$('#proj-name').value=(cfg.project&&cfg.project.name)||'';
   if($('#proj-conv'))$('#proj-conv').value=(cfg.project&&cfg.project.conventions)||'';
   document.querySelectorAll('#prof-seg [data-prof]').forEach(x=>x.classList.toggle('on',x.dataset.prof===(cfg.profile||'balanced')));
 }
-function showTab(t){if(t==='pow'&&!cfg.power)t='gen';curTab=t;document.querySelectorAll('#s-body .pane').forEach(p=>p.classList.toggle('on',p.dataset.p===t));document.querySelectorAll('#s-tabs button').forEach(b=>b.classList.toggle('on',b.dataset.tab===t));$('#s-body').scrollTop=0;if(t==='mem')loadMemoriesUI()}
+function showTab(t){if(t==='pow'&&!cfg.power)t='gen';curTab=t;document.querySelectorAll('#s-body .pane').forEach(p=>p.classList.toggle('on',p.dataset.p===t));document.querySelectorAll('#s-tabs button').forEach(b=>b.classList.toggle('on',b.dataset.tab===t));$('#s-body').scrollTop=0;if(t==='mem')loadMemoriesUI();if(t==='models'){refreshModelsList();renderProfileList()}}
 function fill(){document.querySelectorAll('#s-body [data-k]').forEach(e=>{const v=getPath(cfg,e.dataset.k);e.value=v==null?'':String(v)});document.querySelectorAll('#s-body [data-sw]').forEach(b=>b.setAttribute('aria-checked',!!getPath(cfg,b.dataset.sw)));segs();lab();provVis();filesUI()}
 const segs=()=>document.querySelectorAll('#s-body [data-seg]').forEach(s=>{const v=getPath(cfg,s.dataset.seg);s.querySelectorAll('button').forEach(b=>b.classList.toggle('on',b.dataset.v===v))});
 const lab=()=>{const a=$('[data-o=t]'),b=$('[data-o=m]');if(a)a.textContent=(+cfg.t).toFixed(2);if(b)b.textContent=cfg.m};
@@ -3178,13 +3465,91 @@ $('#s-body').addEventListener('click',async e=>{const t=e.target;let b;
    const b=t.closest('[data-bind-model]');
    const path=b.dataset.path, slot=b.dataset.bindModel;
    try{
+     if(slot==='chat'){
+       // Persist power settings for the previous model, then load the new one's profile
+       const prev=cfg.model_profile_key||(NI&&NI.model_path)||'';
+       if(prev) saveModelProfileFor(prev);
+     }
      await nat('select_model',{path, slot});
      if(slot==='ocr'){ cfg.ocr_path=path; cfg.ocr_engine='mlkit'; saveCfg(); }
-     ninfo(); filesUI(); fillExtModels(); syncOcrUI();
+     let profNote='';
+     if(slot==='chat'){
+       const loaded=loadModelProfileFor(path);
+       fill(); fillPower();
+       profNote=loaded?' · power profile loaded':' · no saved profile (using current settings)';
+     }
+     ninfo(); filesUI(); fillExtModels(); syncOcrUI(); refreshModelsList();
      const note = (slot==='ocr'||slot==='image') ? ' (path reserved; OCR still uses ML Kit until a vision engine is wired)' : ' (no copy)';
-     alert('Bound '+slot+' → '+path.split('/').pop()+note);
+     alert('Bound '+slot+' → '+path.split('/').pop()+note+profNote);
    }catch(x){ alert(x.message); }
    return}
+
+ if(t.closest('#mp-identify')||t.closest('#mp-apply')||t.closest('#mp-apply-save')){
+   const mode=t.closest('#mp-apply-save')?'apply-save':t.closest('#mp-apply')?'apply':'id';
+   const el=$('#mp-id'); if(el){el.style.color='var(--fg-2)';el.textContent='Looking up model…'}
+   try{
+     const info=await identifyModel({});
+     _lastIdentify=info;
+     if(mode!=='id'){applyPresetToCfg(info.preset,{savePath:mode==='apply-save'?info.path:null}); fill(); fillPower(); renderProfileList()}
+     const lines=[
+       info.fileName||'(no file)',
+       info.architecture?('arch: '+info.architecture):'',
+       info.gguf&&info.gguf.name?('gguf: '+info.gguf.name):'',
+       'family: '+info.preset.label+(info.parsed.quant?' · '+info.parsed.quant:''),
+       'suggest: t='+info.preset.t+' top_k='+info.preset.p.top_k+' top_p='+info.preset.p.top_p+' rep='+info.preset.p.repeat_penalty,
+       info.card?('HF: '+info.card.id+' · '+info.card.downloads+' dl'):(info.hf[0]?('HF candidates: '+info.hf.map(h=>h.id).join(', ')):''),
+       info.hfError||'',
+       mode==='id'?'':(mode==='apply-save'?'Preset applied and profile saved.':'Preset applied to live Power settings.')
+     ].filter(Boolean);
+     if(el){el.style.color='var(--success)';el.textContent=lines.join('\n')}
+   }catch(x){if(el){el.style.color='var(--danger)';el.textContent=x.message}}
+   return}
+ if(t.closest('#mp-refresh')){renderProfileList();return}
+ if(t.closest('[data-mp-edit]')){openProfileEditor(t.closest('[data-mp-edit]').dataset.mpEdit);return}
+ if(t.closest('[data-mp-load]')){
+   const path=t.closest('[data-mp-load]').dataset.mpLoad;
+   if(loadModelProfileFor(path)){fill();fillPower();const m=$('#mp-m');if(m){m.style.color='var(--success)';m.textContent='Loaded profile for '+path.split('/').pop()}}
+   renderProfileList();return}
+ if(t.closest('[data-mp-del]')){
+   const path=t.closest('[data-mp-del]').dataset.mpDel;
+   if(!await uiConfirm('Delete power profile for '+path.split('/').pop()+'?'))return;
+   delete cfg.model_profiles[path];saveCfg();renderProfileList();return}
+ if(t.closest('#mp-edit-x')){$('#mp-edit-dlg')?.close();return}
+ if(t.closest('#mp-e-save')){
+   try{
+     const r=readProfileEditor();
+     cfg.model_profiles=cfg.model_profiles||{};
+     const prev=cfg.model_profiles[r.path]||{};
+     cfg.model_profiles[r.path]={t:r.t,m:r.m,p:r.p,srv:prev.srv||{},xj:prev.xj||'',ts:Date.now(),identity:Object.assign({},prev.identity||{},{note:r.note})};
+     saveCfg(); renderProfileList(); $('#mp-edit-dlg')?.close();
+     const m=$('#mp-m');if(m){m.style.color='var(--success)';m.textContent='Profile updated'}
+   }catch(x){alert(x.message)}
+   return}
+ if(t.closest('#mp-e-apply')){
+   try{
+     const r=readProfileEditor();
+     cfg.t=r.t;cfg.m=r.m;cfg.p=structuredClone(r.p);saveCfg();fill();fillPower();
+     const m=$('#mp-m');if(m){m.style.color='var(--success)';m.textContent='Applied to live settings (not saved until Save changes)'}
+   }catch(x){alert(x.message)}
+   return}
+ if(t.closest('#mp-e-del')){
+   const path=$('#mp-e-path').value;
+   if(!await uiConfirm('Delete this profile?'))return;
+   delete cfg.model_profiles[path];saveCfg();renderProfileList();$('#mp-edit-dlg')?.close();return}
+ if(t.closest('#mp-save')){
+   const path=(NI&&NI.model_path)||cfg.model_profile_key;
+   const m=$('#mp-m');
+   if(!path){if(m){m.style.color='var(--danger)';m.textContent='Bind a chat model first.';}return}
+   saveModelProfileFor(path);
+   if(m){m.style.color='var(--success)';m.textContent='Saved profile for '+path.split('/').pop();}
+   refreshModelsList(); renderProfileList(); return}
+ if(t.closest('#mp-clear')){
+   const path=(NI&&NI.model_path)||cfg.model_profile_key;
+   const m=$('#mp-m');
+   if(!path||!cfg.model_profiles||!cfg.model_profiles[path]){if(m){m.style.color='var(--fg-2)';m.textContent='No profile stored for this model.';}return}
+   delete cfg.model_profiles[path]; saveCfg();
+   if(m){m.style.color='var(--success)';m.textContent='Cleared profile for '+path.split('/').pop();}
+   refreshModelsList(); return}
  if(t.closest('#ext-m-add')){
    let ext=($('#ext-m-ext')?.value||'').trim().toLowerCase();
    const path=($('#ext-m-path')?.value||'').trim();
@@ -4118,22 +4483,31 @@ function reconstructOcrLayout(ocrData){
 
 async function refreshModelsList(){
   const box=$('#models-list'); if(!box)return;
-  box.innerHTML='<div style="color:var(--fg-3);padding:8px">Loading…</div>';
+  box.innerHTML='<div style="color:var(--fg-3);padding:8px">Scanning…</div>';
   try{
-    // Listing only — do not auto_bind/restartServers on every Settings open
-    const r=JSON.parse(await nat('list_models_dir',{}));
-    const models=(r.models)||[];
-    if($('#models-dir-in') && r.path) $('#models-dir-in').value=r.path;
+    const raw=await nat('list_models',{});
+    const r=typeof raw==='string'?J.parse(raw):raw;
+    const models=(r.models||r.data&&r.data.models||[]).slice();
     const subs=(r.subdirs||['llm','embed','coder','image','ocr','decision']).join(', ');
+    if($('#models-dir-in') && r.path) $('#models-dir-in').value=r.path;
     if(!models.length){
       box.innerHTML=`<div style="color:var(--fg-3);padding:8px;line-height:1.45">No .gguf files yet under <b>${esc(r.path||'Local Models')}</b>.<br>Subfolders ready: <code>${esc(subs)}</code><br>Drop models into the matching folder, then Refresh.<br><span style="opacity:.85">OCR GGUF is optional — bind under OCR slot if you have one; otherwise AI Fill uses ML Kit + your chat model.</span></div>`;
       return;
     }
-    box.innerHTML=`<div style="font-size:11px;color:var(--fg-3);padding:4px 6px 8px">Subfolders: ${esc(subs)}</div>`+models.map(m=>{
-      const mb=m.mb!=null?Math.round(m.mb)+' MB':Math.round((m.size||0)/1048576)+' MB';
-      const cat=m.category&&m.category!=='root'?` <span style="font-size:10px;padding:1px 6px;border-radius:999px;background:var(--bg-well);color:var(--fg-3)">${esc(m.category)}</span>`:'';
-      return `<div style="display:flex;flex-direction:column;gap:4px;padding:8px 6px;border-bottom:1px solid var(--line)">
-        <div style="font-weight:500;word-break:break-all">${esc(m.name)}${cat} <span style="color:var(--fg-3);font-weight:400">· ${mb}</span></div>
+    // Group by folder (category)
+    const groups={};
+    for(const m of models){
+      const cat=(m.category||m.folder||(()=>{try{const parts=String(m.path||'').split('/');const i=parts.findIndex(x=>x==='Local Models');return i>=0&&parts[i+1]?parts[i+1]:'root'}catch{return 'root'}})()).toLowerCase();
+      (groups[cat]=groups[cat]||[]).push(m);
+    }
+    const order=['llm','embed','coder','image','ocr','decision','root'];
+    const keys=[...order.filter(k=>groups[k]),...Object.keys(groups).filter(k=>!order.includes(k)).sort()];
+    box.innerHTML=keys.map(cat=>{
+      const items=groups[cat].map(m=>{
+        const mb=m.size?((m.size/1048576).toFixed(0)+' MB'):'';
+        const hasProf=cfg.model_profiles&&cfg.model_profiles[m.path];
+        return `<div style="display:flex;flex-direction:column;gap:4px;padding:8px 6px;border-bottom:1px solid var(--line)">
+        <div style="font-weight:500;word-break:break-all">${esc(m.name)}${hasProf?' <span style="color:var(--gold);font-weight:400" title="Has power profile">★</span>':''} <span style="color:var(--fg-3);font-weight:400">· ${mb}</span></div>
         <div style="display:flex;flex-wrap:wrap;gap:6px">
           <button class="btn sm" data-bind-model="chat" data-path="${ea(m.path)}">Chat</button>
           <button class="btn sm" data-bind-model="coder" data-path="${ea(m.path)}">Coder</button>
@@ -4141,11 +4515,14 @@ async function refreshModelsList(){
           <button class="btn sm" data-bind-model="ocr" data-path="${ea(m.path)}">OCR</button>
         </div>
       </div>`;
+      }).join('');
+      return `<div style="margin:4px 0 10px"><div style="font:600 12px var(--mono);color:var(--fg-2);text-transform:uppercase;letter-spacing:.04em;padding:6px 4px 4px;opacity:.9">📁 ${esc(cat)} <span style="font-weight:400;opacity:.7">(${groups[cat].length})</span></div>${items}</div>`;
     }).join('');
   }catch(e){
     box.innerHTML=`<div style="color:var(--danger);padding:8px">${esc(e.message||e)}<br><span style="color:var(--fg-3)">Grant all-files access if needed.</span></div>`;
   }
 }
+
 
 /* ========== Offline converters + Mammoth DOCX (HTML bridge) ========== */
 const Convert = {

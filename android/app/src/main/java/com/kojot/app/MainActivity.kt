@@ -766,18 +766,165 @@ class MainActivity : Activity() {
         runOnUiThread { web.evaluateJavascript("window.__nat($id,$ok,${JSONObject.quote(s)})", null) }
     }
 
-    private fun http(a: JSONObject): JSONObject {
-        val u = URL(a.getString("url"))
-        if (u.protocol != "http" && u.protocol != "https") throw ToolError("only http(s) URLs are allowed")
-        val c = u.openConnection() as HttpURLConnection
-        c.requestMethod = a.optString("method", "GET").uppercase()
-        c.connectTimeout = 15000; c.readTimeout = 25000
-        a.optJSONObject("headers")?.let { h -> h.keys().forEach { k -> c.setRequestProperty(k, h.optString(k)) } }
-        val body = a.optString("body", "")
-        if (body.isNotEmpty() && c.requestMethod != "GET") {
-            c.doOutput = true
-            c.outputStream.use { it.write(body.toByteArray(Charsets.UTF_8)) }
+
+    /** Read GGUF header metadata (general.* keys) without loading tensors. */
+    private fun readGgufMeta(f: File, maxKeys: Int = 64): JSONObject {
+        val out = JSONObject()
+        if (!f.isFile || !f.canRead()) throw ToolError("not readable: ${f.path}")
+        f.inputStream().buffered().use { raw ->
+            val din = java.io.DataInputStream(raw)
+            fun readU32(): Long {
+                val b = ByteArray(4)
+                din.readFully(b)
+                return ((b[3].toLong() and 0xff) shl 24) or ((b[2].toLong() and 0xff) shl 16) or
+                    ((b[1].toLong() and 0xff) shl 8) or (b[0].toLong() and 0xff)
+            }
+            fun readU64(): Long {
+                val lo = readU32(); val hi = readU32()
+                return (hi shl 32) or lo
+            }
+            fun readString(): String {
+                val n = readU64()
+                if (n < 0 || n > 1_000_000) throw ToolError("invalid GGUF string length")
+                val buf = ByteArray(n.toInt())
+                din.readFully(buf)
+                return String(buf, Charsets.UTF_8)
+            }
+            val magic = ByteArray(4)
+            din.readFully(magic)
+            if (String(magic, Charsets.US_ASCII) != "GGUF") throw ToolError("not a GGUF file")
+            val version = readU32()
+            out.put("gguf_version", version)
+            /* tensor_count, kv_count — version >= 2 uses u64 */
+            val tensorCount = if (version >= 2) readU64() else readU32()
+            val kvCount = if (version >= 2) readU64() else readU32()
+            out.put("tensor_count", tensorCount)
+            out.put("kv_count", kvCount)
+            val interesting = setOf(
+                "general.architecture", "general.name", "general.basename", "general.finetune",
+                "general.quantization_version", "general.file_type", "general.size_label",
+                "general.type", "general.license", "general.repo_url", "general.tags"
+            )
+            val meta = JSONObject()
+            val limit = minOf(kvCount, maxKeys.toLong())
+            var i = 0L
+            while (i < limit) {
+                val key = readString()
+                val typ = readU32()
+                fun skipArray() {
+                    val at = readU32(); val n = readU64()
+                    val elem = when (at.toInt()) {
+                        0, 1 -> 1; 2, 3 -> 2; 4, 5, 8 -> 4; 6, 7, 9, 10 -> 8; 11 -> -1; else -> -2
+                    }
+                    if (elem == -1) { // strings
+                        repeat(n.toInt().coerceAtMost(10_000)) { readString() }
+                    } else if (elem > 0) {
+                        val skip = n * elem
+                        if (skip > 50_000_000) throw ToolError("GGUF array too large")
+                        var left = skip
+                        val buf = ByteArray(8192)
+                        while (left > 0) {
+                            val r = din.read(buf, 0, minOf(buf.size.toLong(), left).toInt())
+                            if (r < 0) break
+                            left -= r
+                        }
+                    } else throw ToolError("unsupported GGUF array type $at")
+                }
+                val value: Any? = when (typ.toInt()) {
+                    0 -> din.readUnsignedByte() // u8
+                    1 -> din.readByte() // i8
+                    2 -> { val b = ByteArray(2); din.readFully(b); ((b[1].toInt() and 0xff) shl 8) or (b[0].toInt() and 0xff) } // u16 le
+                    3 -> { val b = ByteArray(2); din.readFully(b); (b[1].toInt() shl 8) or (b[0].toInt() and 0xff) } // i16
+                    4 -> readU32()
+                    5 -> { val v = readU32(); if (v > Int.MAX_VALUE) v - 0x100000000L else v } // i32 approx
+                    6 -> readU64()
+                    7 -> readU64() // i64 treat as u64 bits
+                    8 -> java.lang.Float.intBitsToFloat(readU32().toInt())
+                    9 -> java.lang.Double.longBitsToDouble(readU64())
+                    10 -> din.readBoolean()
+                    11 -> readString()
+                    12 -> { skipArray(); null }
+                    else -> throw ToolError("unsupported GGUF type $typ for key $key")
+                }
+                if (key in interesting || key.startsWith("general.")) {
+                    if (value != null) meta.put(key, value)
+                } else if (typ.toInt() == 12) {
+                    // already skipped
+                }
+                i++
+            }
+            out.put("meta", meta)
+            out.put("architecture", meta.optString("general.architecture", ""))
+            out.put("name", meta.optString("general.name", meta.optString("general.basename", "")))
         }
+        out.put("path", f.absolutePath)
+        out.put("file_name", f.name)
+        out.put("size", f.length())
+        return out
+    }
+
+
+    /** Block SSRF: private, loopback, link-local, multicast, and cloud metadata hosts. */
+    private fun assertPublicHttpUrl(raw: String): URL {
+        val u = try { URL(raw) } catch (e: Exception) { throw ToolError("invalid URL") }
+        if (u.protocol != "http" && u.protocol != "https") throw ToolError("only http(s) URLs are allowed")
+        val host = (u.host ?: "").lowercase()
+        if (host.isEmpty()) throw ToolError("URL has no hostname")
+        if (host == "localhost" || host.endsWith(".localhost") || host.endsWith(".local") ||
+            host == "0.0.0.0" || host == "::1" || host == "[::1]" ||
+            host == "metadata.google.internal" || host.endsWith(".internal")) {
+            throw ToolError("SSRF blocked: host $host is not allowed")
+        }
+        // Literal IP in the URL
+        try {
+            val ip = java.net.InetAddress.getByName(host)
+            if (ip.isAnyLocalAddress || ip.isLoopbackAddress || ip.isLinkLocalAddress ||
+                ip.isSiteLocalAddress || ip.isMulticastAddress) {
+                throw ToolError("SSRF blocked: $host resolves to a private/reserved address")
+            }
+            // AWS/GCP/Azure metadata
+            if (ip.hostAddress == "169.254.169.254" || ip.hostAddress.startsWith("169.254.")) {
+                throw ToolError("SSRF blocked: link-local / metadata address")
+            }
+        } catch (e: ToolError) { throw e }
+        catch (e: Exception) { throw ToolError("DNS failed for $host: ${e.message}") }
+        return u
+    }
+
+    private fun http(a: JSONObject): JSONObject {
+        val u = assertPublicHttpUrl(a.getString("url"))
+        // Re-check after redirects by disabling auto-follow and walking manually
+        var current = u
+        var redirects = 0
+        var last: HttpURLConnection? = null
+        while (redirects <= 5) {
+            val c = current.openConnection() as HttpURLConnection
+            c.instanceFollowRedirects = false
+            c.requestMethod = a.optString("method", "GET").uppercase()
+            c.connectTimeout = 15000; c.readTimeout = 25000
+            a.optJSONObject("headers")?.let { h -> h.keys().forEach { k -> c.setRequestProperty(k, h.optString(k)) } }
+            if (redirects == 0) {
+                val body = a.optString("body", "")
+                if (body.isNotEmpty() && c.requestMethod != "GET") {
+                    c.doOutput = true
+                    c.outputStream.use { it.write(body.toByteArray(Charsets.UTF_8)) }
+                }
+            }
+            val code = c.responseCode
+            if (code in 300..399) {
+                val loc = c.getHeaderField("Location") ?: throw ToolError("redirect without Location")
+                c.disconnect()
+                current = assertPublicHttpUrl(
+                    if (loc.startsWith("http://") || loc.startsWith("https://")) loc
+                    else URL(current, loc).toString()
+                )
+                redirects++
+                continue
+            }
+            last = c
+            break
+        }
+        val c = last ?: throw ToolError("too many redirects")
         val code = c.responseCode
         val st = if (code >= 400) c.errorStream else c.inputStream
         val txt = st?.bufferedReader()?.use { r ->
@@ -785,7 +932,7 @@ class MainActivity : Activity() {
             while (r.read(buf).also { n = it } > 0 && sb.length < 300_000) sb.append(buf, 0, n)
             sb.toString()
         } ?: ""
-        return JSONObject().put("status", code).put("body", txt)
+        return JSONObject().put("status", code).put("body", txt).put("final_url", current.toString())
     }
 
     private val memoryOps = setOf(
@@ -900,7 +1047,24 @@ class MainActivity : Activity() {
             JSONObject().put("text", d.path).put("path", d.path)
                 .put("subdirs", org.json.JSONArray(modelSubdirs))
         }
-        "list_models_dir" -> {
+        "gguf_info" -> {
+            val path = a.optString("path").ifBlank { prefs.getString("model_path", "") ?: "" }
+            if (path.isBlank()) throw ToolError("path required (or bind a chat model first)")
+            val f = File(path)
+            try {
+                val info = readGgufMeta(f)
+                info.put("text", "GGUF ${info.optString("name").ifBlank { f.name }} · arch ${info.optString("architecture").ifBlank { "?" }} · ${f.length() / 1048576} MB")
+                info
+            } catch (e: Exception) {
+                JSONObject()
+                    .put("path", f.absolutePath)
+                    .put("file_name", f.name)
+                    .put("size", f.length())
+                    .put("error", e.message ?: "parse failed")
+                    .put("text", "Could not parse GGUF metadata for ${f.name}: ${e.message}")
+            }
+        }
+        "list_models", "list_models_dir" -> {
             val d = modelsDir()
             if (!d.isDirectory) throw ToolError("models folder missing: ${d.path}")
             val found = ArrayList<File>()
